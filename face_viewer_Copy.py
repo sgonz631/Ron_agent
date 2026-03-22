@@ -2,9 +2,9 @@ import os
 import sys
 import pygame
 
-FACES_ROOT = "faces"
-SCREEN_WIDTH = 480
-SCREEN_HEIGHT = 320
+FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 480
 FRAME_DELAY_MS = 700
 BACKGROUND_COLOR = (0, 0, 0)
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
