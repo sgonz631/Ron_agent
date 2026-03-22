@@ -2,6 +2,15 @@ import os
 import sys
 import pygame
 
+# Wake word model
+import numpy as np
+import sounddevice as sd
+import scipy.signal
+import select
+import openwakeword
+from openwakeword.model import Model
+
+
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 480
@@ -128,7 +137,9 @@ def main():
     pygame.quit()
     sys.exit()
 
-#Wake Up Word#
+
+
+
 class WakeWordDetector:
     WAKE_WORD_MODEL = "WakeupWord/Hi_Ron.onnx"
     WAKE_WORD_THRESHOLD = 0.5
@@ -246,7 +257,7 @@ class WakeWordDetector:
 
 
 if __name__ == "__main__":
-    main()
+    
     detector = WakeWordDetector(exact_word=True)
     
     print("Starting wake word detection...")
@@ -257,5 +268,7 @@ if __name__ == "__main__":
     if result == "WAKE":
         print("=" * 50)
         print("✓ Correct wake word detected! Proceeding...")
+    #main()
+
     # For testing on cmd: py -3.11 face_viewer_Copy.py
     # For testing terminal vscode: python face_viewer_Copy.py
