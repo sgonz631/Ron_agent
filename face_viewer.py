@@ -5,6 +5,9 @@ import pygame
 # Wake word model
 from testwakeword import WakeWordDetector
 
+#Call Ollama Chatbot
+import chatbot
+
 
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
 SCREEN_WIDTH = 800
@@ -61,6 +64,7 @@ def draw_centered(screen, image, bg_color):
 
 
 def launch_GUI():
+
     pygame.init()
     pygame.display.set_caption("Ron Face Viewer")
 
@@ -132,6 +136,7 @@ def launch_GUI():
     pygame.quit()
     sys.exit()
 
+
 def main():
     print("[SYSTEM] Waiting for wake word...")
     detector = WakeWordDetector(exact_word=True)
@@ -139,7 +144,7 @@ def main():
 
     if result == "WAKE":
         launch_GUI()
-        
+        chatbot.chat_with_ollama()
 
 if __name__ == "__main__":
     main()
