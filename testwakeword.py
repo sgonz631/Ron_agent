@@ -116,8 +116,7 @@ class WakeWordDetector:
             print(f"[WAKE WORD] Stream Error: {e}")
             raise
 
-
-if __name__ == "__main__":
+def run():
     detector = WakeWordDetector(exact_word=True)
 
     print("Starting wake word detection...")
@@ -128,3 +127,13 @@ if __name__ == "__main__":
     if result == "WAKE":
         print("=" * 50)
         print("[OK] Correct wake word detected! Proceeding...")
+
+if __name__ == "__main__":
+    print("[TEST] Running WakeWordDetector standalone test...")
+
+    detector = WakeWordDetector(exact_word=True)
+
+    result = detector.detect()
+
+    if result == "WAKE":
+        print("[TEST] Wake word detected successfully.")
