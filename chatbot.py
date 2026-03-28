@@ -143,3 +143,5 @@ def setup_ollama():
 if __name__ == "__main__":
     setup_ollama()
     chat_with_ollama()
+    #end
+    
