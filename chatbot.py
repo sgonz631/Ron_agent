@@ -4,7 +4,9 @@ import subprocess
 import time
 import sys
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
+OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
 OLLAMA_MODEL = "gemma3:4b"
 
 def chat_with_ollama():
@@ -32,7 +34,7 @@ def chat_with_ollama():
 
         try:
             response = requests.post(
-                OLLAMA_URL,
+                OLLAMA_CHAT_URL,
                 json={
                     "model": OLLAMA_MODEL,
                     "messages": messages,
@@ -57,9 +59,10 @@ def chat_with_ollama():
             print("[CHAT] Unexpected Ollama response format.")
             break
 
+
 def is_ollama_running():
     try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=2)
+        response = requests.get(OLLAMA_TAGS_URL, timeout=2)
         return response.status_code == 200
     except requests.RequestException:
         return False
@@ -69,18 +72,14 @@ def start_ollama():
     print("[OLLAMA] Starting Ollama server...")
 
     subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        ["ollama", "serve"]
     )
 
-    # Wait until server is ready
     for _ in range(20):
         if is_ollama_running():
             print("[OLLAMA] Server is running.")
             return True
         time.sleep(1)
-
     raise RuntimeError("Ollama failed to start.")
 
 
@@ -88,15 +87,16 @@ def ensure_model():
     print(f"[OLLAMA] Checking model: {OLLAMA_MODEL}")
 
     try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags")
+        response = requests.get(OLLAMA_TAGS_URL, timeout=10)
+        response.raise_for_status()
         models = response.json().get("models", [])
 
-        if any(OLLAMA_MODEL in m["name"] for m in models):
+        if any(m.get("name") == OLLAMA_MODEL for m in models):
             print("[OLLAMA] Model already installed.")
             return
 
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[OLLAMA] Could not verify installed models: {e}")
 
     print(f"[OLLAMA] Pulling model {OLLAMA_MODEL}...")
     subprocess.run(["ollama", "pull", OLLAMA_MODEL], check=True)
@@ -106,8 +106,8 @@ def warmup_model():
     print("[OLLAMA] Warming up model...")
 
     try:
-        requests.post(
-            f"{OLLAMA_URL}/api/chat",
+        response = requests.post(
+            OLLAMA_CHAT_URL,
             json={
                 "model": OLLAMA_MODEL,
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -115,6 +115,7 @@ def warmup_model():
             },
             timeout=120
         )
+        response.raise_for_status()
         print("[OLLAMA] Model ready.")
 
     except Exception as e:
@@ -136,11 +137,9 @@ def setup_ollama():
 
     ensure_model()
     warmup_model()
-
     print("[OLLAMA] Setup complete.")
 
 
 if __name__ == "__main__":
     setup_ollama()
-    warmup_model()
     chat_with_ollama()
