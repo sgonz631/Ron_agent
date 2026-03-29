@@ -61,6 +61,7 @@ def chat_with_ollama(shared_state):
 
             messages.append({"role": "assistant", "content": assistant_text})
 
+            time.sleep(5)   # hold speaking face for 5 seconds
             shared_state["expression"] = "listening"
 
         except requests.RequestException as e:
