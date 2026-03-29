@@ -145,8 +145,9 @@ def main():
     
 
     if result == "WAKE":
-        launch_GUI()
         chatbot.chat_with_ollama()
+        launch_GUI()
+        
 
 if __name__ == "__main__":
     main()
