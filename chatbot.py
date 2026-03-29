@@ -9,7 +9,7 @@ OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
 OLLAMA_MODEL = "gemma3:4b"
 
-def chat_with_ollama():
+def chat_with_ollama(shared_state):
     print("[CHAT] Wake word detected. Starting terminal chat.")
     print("[CHAT] Type 'exit' to stop chatting.\n")
 
@@ -20,19 +20,26 @@ def chat_with_ollama():
         }
     ]
 
-    while True:
+    shared_state["expression"] = "listening"
+
+    while shared_state["running"]:
         user_text = input("You: ").strip()
 
         if not user_text:
+            shared_state["expression"] = "listening"
             continue
 
         if user_text.lower() in {"exit", "quit", "stop"}:
             print("[CHAT] Ending chat mode.")
+            shared_state["expression"] = "idle"
+            shared_state["running"] = False
             break
 
         messages.append({"role": "user", "content": user_text})
 
         try:
+            shared_state["expression"] = "thinking"
+
             response = requests.post(
                 OLLAMA_CHAT_URL,
                 json={
@@ -47,16 +54,25 @@ def chat_with_ollama():
             data = response.json()
             assistant_text = data["message"]["content"].strip()
 
+            shared_state["expression"] = "speaking"
+
             safe_text = assistant_text.encode("latin-1", errors="replace").decode("latin-1")
             print(f"Ronnor: {safe_text}")
 
             messages.append({"role": "assistant", "content": assistant_text})
 
+            shared_state["expression"] = "listening"
+
         except requests.RequestException as e:
             print(f"[CHAT] Ollama request failed: {e}")
+            shared_state["expression"] = "idle"
+            shared_state["running"] = False
             break
+
         except KeyError:
             print("[CHAT] Unexpected Ollama response format.")
+            shared_state["expression"] = "idle"
+            shared_state["running"] = False
             break
 
 

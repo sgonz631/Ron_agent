@@ -17,6 +17,11 @@ FRAME_DELAY_MS = 700
 BACKGROUND_COLOR = (0, 0, 0)
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
+shared_state = {
+    "expression": "idle",   # idle, listening, thinking, speaking
+    "running": True
+}
+
 
 def load_face_folders(root_folder):
     expressions = {}
@@ -64,66 +69,54 @@ def draw_centered(screen, image, bg_color):
     pygame.display.flip()
 
 
-def launch_GUI():
-
+def launch_GUI(shared_state):
     pygame.init()
     pygame.display.set_caption("Ron Face Viewer")
-
-    # windowed mode first for testing
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     clock = pygame.time.Clock()
 
     expressions = load_face_folders(FACES_ROOT)
-    expression_names = list(expressions.keys())
 
-    print("Loaded states:", expression_names)
+    if "idle" not in expressions:
+        print("Error: 'idle' folder not found.")
+        pygame.quit()
+        return
 
-    expression_index = 0
     frame_index = 0
-    autoplay = True
     last_frame_change = pygame.time.get_ticks()
+    current_expression = shared_state["expression"]
 
-    current_expression = expression_names[expression_index]
     current_image = load_and_scale_image(
         expressions[current_expression][frame_index],
         (SCREEN_WIDTH, SCREEN_HEIGHT)
     )
 
     running = True
-    while running:
+    while running and shared_state["running"]:
         now = pygame.time.get_ticks()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+                shared_state["running"] = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                running = False
+                shared_state["running"] = False
 
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                elif event.key == pygame.K_RIGHT:
-                    frame_index = (frame_index + 1) % len(expressions[current_expression])
-                elif event.key == pygame.K_LEFT:
-                    frame_index = (frame_index - 1) % len(expressions[current_expression])
-                elif event.key == pygame.K_DOWN:
-                    expression_index = (expression_index + 1) % len(expression_names)
-                    current_expression = expression_names[expression_index]
-                    frame_index = 0
-                    print("State:", current_expression)
-                elif event.key == pygame.K_UP:
-                    expression_index = (expression_index - 1) % len(expression_names)
-                    current_expression = expression_names[expression_index]
-                    frame_index = 0
-                    print("State:", current_expression)
-                elif event.key == pygame.K_SPACE:
-                    autoplay = not autoplay
-                    print("Autoplay:", autoplay)
+        new_expression = shared_state["expression"]
 
-                current_image = load_and_scale_image(
-                    expressions[current_expression][frame_index],
-                    (SCREEN_WIDTH, SCREEN_HEIGHT)
-                )
+        if new_expression not in expressions:
+            new_expression = "idle"
 
-        if autoplay and now - last_frame_change >= FRAME_DELAY_MS:
+        if new_expression != current_expression:
+            current_expression = new_expression
+            frame_index = 0
+            current_image = load_and_scale_image(
+                expressions[current_expression][frame_index],
+                (SCREEN_WIDTH, SCREEN_HEIGHT)
+            )
+
+        if now - last_frame_change >= FRAME_DELAY_MS:
             frame_index = (frame_index + 1) % len(expressions[current_expression])
             current_image = load_and_scale_image(
                 expressions[current_expression][frame_index],
@@ -135,8 +128,6 @@ def launch_GUI():
         clock.tick(30)
 
     pygame.quit()
-    sys.exit()
-
 
 def main():
     chatbot.setup_ollama()
@@ -146,14 +137,14 @@ def main():
     result = detector.detect()
 
     if result == "WAKE":
-        chat_thread = threading.Thread(target=chatbot.chat_with_ollama, daemon=True) #chat with ollama in one thread
+        chat_thread = threading.Thread(target=chatbot.chat_with_ollama,args=(shared_state,), daemon=True) #chat with ollama in one thread
         chat_thread.start()
         launch_GUI()
     
 
     if result == "WAKE":
         chatbot.chat_with_ollama()
-        launch_GUI()
+        launch_GUI(shared_state)
         
 
 if __name__ == "__main__":
