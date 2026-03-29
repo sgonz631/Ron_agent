@@ -1,6 +1,15 @@
 import os
 import sys
-import pygame 
+
+import os
+
+os.environ["LANG"] = "en_US.UTF-8"
+os.environ["LANGUAGE"] = "en_US.UTF-8"
+os.environ["LC_CTYPE"] = "en_US.UTF-8"
+os.environ.pop("LC_ALL", None)
+
+import sys
+import pygame
 import threading #one thread for Ollama and another for the images
  
 # Wake word model
