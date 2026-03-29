@@ -1,7 +1,8 @@
 import os
 import sys
-import pygame
-
+import pygame 
+import threading #one thread for Ollama and another for the images
+ 
 # Wake word model
 from testwakeword import WakeWordDetector
 
@@ -140,8 +141,14 @@ def launch_GUI():
 def main():
     chatbot.setup_ollama()
     print("[SYSTEM] Waiting for wake word...")
+
     detector = WakeWordDetector(exact_word=True)
     result = detector.detect()
+
+    if result == "WAKE":
+        chat_thread = threading.Thread(target=chatbot.chat_with_ollama, daemon=True) #chat with ollama in one thread
+        chat_thread.start()
+        launch_GUI()
     
 
     if result == "WAKE":
