@@ -139,11 +139,11 @@ def main():
     if result == "WAKE":
         chat_thread = threading.Thread(target=chatbot.chat_with_ollama,args=(shared_state,), daemon=True) #chat with ollama in one thread
         chat_thread.start()
-        launch_GUI()
+        launch_GUI(shared_state)
     
 
     if result == "WAKE":
-        chatbot.chat_with_ollama()
+        chatbot.chat_with_ollama(shared_state)
         launch_GUI(shared_state)
         
 
