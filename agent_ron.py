@@ -141,6 +141,7 @@ def main():
     print("[SYSTEM] Waiting for wake word...")
     detector = WakeWordDetector(exact_word=True)
     result = detector.detect()
+    chatbot.setup_ollama()
 
     if result == "WAKE":
         launch_GUI()
