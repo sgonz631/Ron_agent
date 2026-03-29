@@ -32,7 +32,7 @@ def chat_with_ollama(shared_state):
         if user_text.lower() in {"exit", "quit", "stop"}:
             print("[CHAT] Ending chat mode.")
             shared_state["expression"] = "idle"
-            shared_state["running"] = False
+            shared_state["chat_active"] = False
             break
 
         messages.append({"role": "user", "content": user_text})
@@ -66,13 +66,13 @@ def chat_with_ollama(shared_state):
         except requests.RequestException as e:
             print(f"[CHAT] Ollama request failed: {e}")
             shared_state["expression"] = "idle"
-            shared_state["running"] = False
+            shared_state["chat_active"] = False
             break
 
         except KeyError:
             print("[CHAT] Unexpected Ollama response format.")
             shared_state["expression"] = "idle"
-            shared_state["running"] = False
+            shared_state["chat_active"] = False
             break
 
 

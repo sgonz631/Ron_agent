@@ -17,11 +17,6 @@ FRAME_DELAY_MS = 700
 BACKGROUND_COLOR = (0, 0, 0)
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
-shared_state = {
-    "expression": "idle",   # idle, listening, thinking, speaking
-    "running": True
-}
-
 
 def load_face_folders(root_folder):
     expressions = {}
@@ -131,20 +126,31 @@ def launch_GUI(shared_state):
 
 def main():
     chatbot.setup_ollama()
-    print("[SYSTEM] Waiting for wake word...")
+
+    shared_state = {
+        "expression": "idle",
+        "running": True,
+        "chat_active": False
+    }
+
+    gui_thread = threading.Thread(target=launch_GUI, args=(shared_state,), daemon=True)
+    gui_thread.start()
 
     detector = WakeWordDetector(exact_word=True)
-    result = detector.detect()
 
-    if result == "WAKE":
-        chat_thread = threading.Thread(target=chatbot.chat_with_ollama,args=(shared_state,), daemon=True) #chat with ollama in one thread
-        chat_thread.start()
-        launch_GUI(shared_state)
-    
+    while shared_state["running"]:
+        shared_state["expression"] = "idle"
+        print("[SYSTEM] Waiting for wake word...")
 
-    if result == "WAKE":
-        chatbot.chat_with_ollama(shared_state)
-        launch_GUI(shared_state)
+        result = detector.detect()
+
+        if result == "WAKE" and shared_state["running"]:
+            shared_state["chat_active"] = True
+            chatbot.chat_with_ollama(shared_state)
+            shared_state["chat_active"] = False
+            shared_state["expression"] = "idle"
+
+    print("[SYSTEM] Shutting down.")
         
 
 if __name__ == "__main__":
