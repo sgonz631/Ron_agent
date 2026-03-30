@@ -24,15 +24,27 @@ def chat_with_ollama(shared_state):
 
     while shared_state["running"]:
         user_text = input("You: ").strip()
+        command = user_text.lower()
 
         if not user_text:
             shared_state["expression"] = "listening"
             continue
 
-        if user_text.lower() in {"exit", "quit", "stop"}:
+        # --- END CHAT ONLY ---        
+        if command in {"bye", "stop", "quit"}:
             print("[CHAT] Ending chat mode.")
+            shared_state["expression"] = "speaking"
+            time.sleep(1.5)   # like saying goodbye
             shared_state["expression"] = "idle"
             shared_state["chat_active"] = False
+            break
+
+        # --- CLOSE ENTIRE APP ---
+        if command == "exit":
+            print("[SYSTEM] Shutting down Ronnor.")
+            shared_state["expression"] = "idle"
+            shared_state["chat_active"] = False
+            shared_state["running"] = False
             break
 
         messages.append({"role": "user", "content": user_text})
