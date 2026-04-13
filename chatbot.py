@@ -1,13 +1,20 @@
-# CALL OLLAMA + PIPER TTS
+# CALL OLLAMA + PIPER TTS + WHISPER STT
+
 import requests
 import subprocess
 import time
-import os
-from pathlib import Path
+import re
+import unicodedata
 
 # Text-to-speech helper
 import piper_tts
+
+# Speech-to-text helper
 import whisper_stt
+
+#time helpers for state tracking
+from state_utils import set_expression, print_state_summary
+
 
 
 # -------------------------------------------------------------------
@@ -20,17 +27,59 @@ OLLAMA_MODEL = "gemma3:4b"
 
 
 # -------------------------------------------------------------------
+# TEXT NORMALIZATION / EXIT PHRASE DETECTION
+# -------------------------------------------------------------------
+def normalize_user_text(text: str) -> str:
+    """
+    Normalize text for intent matching:
+    - lowercase
+    - remove accents
+    - remove punctuation
+    - collapse spaces
+    """
+    text = text.lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def is_end_chat_phrase(text: str) -> bool:
+    """
+    Returns True if the user said a phrase that should end the chat
+    and return Ronnor to wake-word mode.
+
+    Uses partial matching so it also works if Whisper adds extra words.
+    """
+    normalized = normalize_user_text(text)
+
+    end_phrases = [
+        "bye",
+        "bye bye",
+        "thank you",
+        "thank you ron",
+        "thatll be all",
+        "that will be all",
+    ]
+
+    return any(phrase in normalized for phrase in end_phrases)
+
+
+# -------------------------------------------------------------------
 # CHAT LOOP
 # -------------------------------------------------------------------
 def chat_with_ollama(shared_state):
     """
-    Starts a terminal-based chat with Ollama.
+    Starts a chat session with Ollama.
 
     Behavior:
-    - 'bye' -> ends only the current chat session
-    - 'exit' -> closes the entire app
-    - every Ollama response is sent to Piper for speech output
-    - shared_state drives the face animations in agent_ron.py
+    - voice is the default input mode
+    - space bar in agent_ron.py can force text input for the next turn
+    - interrupt_requested lets text input take priority
+    - 'bye' ends only the current chat session
+    - 'exit' closes the whole app
+    - every Ollama response is spoken through Piper
     """
     print("[CHAT] Wake word detected. Starting terminal chat.")
     print("[CHAT] Type 'bye' to end chat, 'exit' to close Ronnor.\n")
@@ -43,17 +92,27 @@ def chat_with_ollama(shared_state):
         }
     ]
 
-    # Show listening face at the beginning of chat mode
+    # Start in listening state
     shared_state["expression"] = "listening"
 
     # Main chat loop
     while shared_state["running"]:
-    # -----------------------------------------------------------
-    # INPUT SELECTION
-    # Default = voice
-    # If space bar was pressed in agent_ron GUI, use text once
-    # -----------------------------------------------------------
 
+        # -----------------------------------------------------------
+        # GLOBAL INTERRUPT HANDLER
+        # If space was pressed in the GUI, this flag is raised.
+        # We clear it here and force the next input to be text.
+        # -----------------------------------------------------------
+        if shared_state.get("interrupt_requested", False):
+            print("[CHAT] Interrupt detected.")
+            shared_state["interrupt_requested"] = False
+            shared_state["expression"] = "listening"
+
+        # -----------------------------------------------------------
+        # INPUT SELECTION
+        # Default = voice
+        # If space bar was pressed in agent_ron GUI, use text once
+        # -----------------------------------------------------------
         if shared_state.get("force_text_input", False):
             shared_state["force_text_input"] = False
             user_text = input("You (text): ").strip()
@@ -66,24 +125,26 @@ def chat_with_ollama(shared_state):
 
         command = user_text.lower()
 
+        # Ignore empty input
         if not user_text:
             shared_state["expression"] = "listening"
             continue
 
         # -----------------------------------------------------------
         # END CHAT ONLY
+        # This now works for typed commands and voice phrases
         # -----------------------------------------------------------
-        if command in {"bye", "stop", "quit"}:
+        if command in {"bye", "stop", "quit"} or is_end_chat_phrase(user_text):
             print("[CHAT] Ending chat mode.")
 
-            # Optional spoken goodbye through Piper
+            # Optional spoken goodbye
             try:
-                shared_state["expression"] = "speaking"
+                set_expression(shared_state, "speaking")
                 piper_tts.speak_text("Goodbye! See you soon!")
             except Exception as e:
                 print(f"[TTS] Goodbye speech failed: {e}")
             finally:
-                shared_state["expression"] = "idle"
+                set_expression(shared_state, "idle")
 
             shared_state["chat_active"] = False
             break
@@ -101,18 +162,27 @@ def chat_with_ollama(shared_state):
             except Exception as e:
                 print(f"[TTS] Shutdown speech failed: {e}")
             finally:
-                shared_state["expression"] = "idle"
+                set_expression(shared_state, "idle")
 
             shared_state["chat_active"] = False
             shared_state["running"] = False
             break
 
-        # Save the user's message into conversation memory
+        # Save user's message into conversation memory
         messages.append({"role": "user", "content": user_text})
 
         try:
+            # -------------------------------------------------------
+            # CHECK INTERRUPT BEFORE SENDING TO OLLAMA
+            # -------------------------------------------------------
+            if shared_state.get("interrupt_requested", False):
+                print("[CHAT] Request interrupted before sending to Ollama.")
+                shared_state["interrupt_requested"] = False
+                shared_state["expression"] = "listening"
+                continue
+
             # Show thinking face while Ollama is generating
-            shared_state["expression"] = "thinking"
+            set_expression(shared_state, "thinking")
 
             response = requests.post(
                 OLLAMA_CHAT_URL,
@@ -128,17 +198,29 @@ def chat_with_ollama(shared_state):
             data = response.json()
             assistant_text = data["message"]["content"].strip()
 
-             # Print response safely
+            # Print response safely
             try:
                 print(f"Ronnor: {assistant_text}")
             except UnicodeEncodeError:
                 fallback_text = assistant_text.encode("ascii", errors="replace").decode("ascii")
                 print(f"Ronnor: {fallback_text}")
 
-              # Save assistant message to memory
+            # Save assistant message to memory
             messages.append({"role": "assistant", "content": assistant_text})
 
-            shared_state["expression"] = "speaking"
+            # -------------------------------------------------------
+            # CHECK INTERRUPT BEFORE TTS
+            # -------------------------------------------------------
+            if shared_state.get("interrupt_requested", False):
+                print("[CHAT] TTS skipped due to text-input interrupt.")
+                shared_state["interrupt_requested"] = False
+                shared_state["expression"] = "listening"
+                continue
+
+            # -------------------------------------------------------
+            # SPEAK WITH PIPER
+            # -------------------------------------------------------
+            set_expression(shared_state, "speaking")
             try:
                 piper_tts.speak_text(assistant_text)
             finally:
@@ -150,30 +232,29 @@ def chat_with_ollama(shared_state):
             if shared_state["running"]:
                 shared_state["expression"] = "listening"
             continue
-        
+
         except requests.RequestException as e:
             print(f"[CHAT] Ollama request failed: {e}")
-            shared_state["expression"] = "idle"
+            set_expression(shared_state, "idle")
             shared_state["chat_active"] = False
             break
 
         except KeyError:
             print("[CHAT] Unexpected Ollama response format.")
-            shared_state["expression"] = "idle"
+            set_expression(shared_state, "idle")
             shared_state["chat_active"] = False
             break
 
         except KeyboardInterrupt:
             print("\n[CHAT] Interrupted by user.")
-            shared_state["expression"] = "idle"
+            set_expression(shared_state, "idle")
             shared_state["chat_active"] = False
             shared_state["running"] = False
-            break        
+            break
 
         except Exception as e:
-            # Catch any unexpected TTS or parsing issue
             print(f"[CHAT] Unexpected error: {e}")
-            shared_state["expression"] = "idle"
+            set_expression(shared_state, "idle")
             shared_state["chat_active"] = False
             break
 
@@ -296,7 +377,9 @@ if __name__ == "__main__":
     test_state = {
         "expression": "idle",
         "running": True,
-        "chat_active": True
+        "chat_active": True,
+        "force_text_input": False,
+        "interrupt_requested": False,
     }
 
     setup_ollama()

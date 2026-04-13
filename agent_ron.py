@@ -1,7 +1,6 @@
 import os
 import sys
-
-import os
+import signal
 
 os.environ["LANG"] = "en_US.UTF-8"
 os.environ["LANGUAGE"] = "en_US.UTF-8"
@@ -20,6 +19,9 @@ import chatbot
 
 #TTS
 #import piper_tts
+
+#Time Helpers
+from state_utils import set_expression, print_state_summary
 
 
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
@@ -158,25 +160,53 @@ def main():
         "interrupt_requested": False,
     }
 
-    gui_thread = threading.Thread(target=launch_GUI, args=(shared_state,), daemon=True)
+    # -----------------------------------------------------------
+    # SAFE TERMINAL EXIT HANDLER
+    # Ctrl+C or kill signal will shut the app down cleanly
+    # -----------------------------------------------------------
+    def safe_shutdown(signum=None, frame=None):
+        print("\n[SYSTEM] Safe shutdown requested from terminal...")
+        shared_state["running"] = False
+        shared_state["chat_active"] = False
+        shared_state["interrupt_requested"] = True
+        shared_state["expression"] = "idle"
+
+    signal.signal(signal.SIGINT, safe_shutdown)   # Ctrl+C
+    signal.signal(signal.SIGTERM, safe_shutdown)  # kill / system stop
+
+    gui_thread = threading.Thread(target=launch_GUI, args=(shared_state,))
     gui_thread.start()
 
     detector = WakeWordDetector(exact_word=True)
 
-    while shared_state["running"]:
-        shared_state["expression"] = "idle"
-        print("[SYSTEM] Waiting for wake word...")
-
-        result = detector.detect()
-
-        if result == "WAKE" and shared_state["running"]:
-            shared_state["chat_active"] = True
-            chatbot.chat_with_ollama(shared_state)
-            shared_state["chat_active"] = False
+    try:
+        while shared_state["running"]:
             shared_state["expression"] = "idle"
+            print("[SYSTEM] Waiting for wake word...")
 
-    print("[SYSTEM] Shutting down.")
-        
+            result = detector.detect()
+
+            if result == "WAKE" and shared_state["running"]:
+                shared_state["chat_active"] = True
+                chatbot.chat_with_ollama(shared_state)
+                shared_state["chat_active"] = False
+                shared_state["expression"] = "idle"
+
+    except KeyboardInterrupt:
+        # Extra protection if Ctrl+C reaches here directly
+        safe_shutdown()
+
+    finally:
+        shared_state["running"] = False
+        shared_state["chat_active"] = False
+        shared_state["expression"] = "idle"
+
+        # Wait briefly for GUI thread to exit cleanly
+        if gui_thread.is_alive():
+            gui_thread.join(timeout=2)
+
+        print("[SYSTEM] Shutting down.")
+        print_state_summary(shared_state)
 
 if __name__ == "__main__":
     main()
