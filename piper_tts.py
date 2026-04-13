@@ -129,8 +129,8 @@ def speak_text(text: str, voice_model: Optional[str | Path] = None) -> bool:
         wav_path = tmp.name
 
     try:
-        # Generate WAV with Piper
-        result = subprocess.run(
+        # Generate WAV with Piper using explicit UTF-8 bytes
+        subprocess.run(
             [
                 str(PIPER_EXE),
                 "--model",
@@ -138,8 +138,7 @@ def speak_text(text: str, voice_model: Optional[str | Path] = None) -> bool:
                 "--output_file",
                 wav_path,
             ],
-            input=clean_text,
-            text=True,
+            input=clean_text.encode("utf-8"),
             capture_output=True,
             env=env,
             check=True,
@@ -155,7 +154,7 @@ def speak_text(text: str, voice_model: Optional[str | Path] = None) -> bool:
         return True
 
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.strip() if e.stderr else str(e)
+        stderr = e.stderr.decode("utf-8", errors="ignore").strip() if e.stderr else str(e)
         raise RuntimeError(f"Piper/aplay failed: {stderr}")
 
     finally:

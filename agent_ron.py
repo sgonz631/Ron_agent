@@ -18,6 +18,9 @@ from testwakeword import WakeWordDetector
 #Call Ollama Chatbot
 import chatbot
 
+#TTS
+#import piper_tts
+
 
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
 SCREEN_WIDTH = 800
