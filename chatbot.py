@@ -106,19 +106,21 @@ def chat_with_ollama(shared_state):
                     "messages": messages,
                     "stream": False
                 },
-                timeout=120
+                timeout=300
             )
             response.raise_for_status()
 
             data = response.json()
             assistant_text = data["message"]["content"].strip()
 
+             # Print response safely
             try:
                 print(f"Ronnor: {assistant_text}")
             except UnicodeEncodeError:
                 fallback_text = assistant_text.encode("ascii", errors="replace").decode("ascii")
                 print(f"Ronnor: {fallback_text}")
 
+              # Save assistant message to memory
             messages.append({"role": "assistant", "content": assistant_text})
 
             shared_state["expression"] = "speaking"
@@ -128,6 +130,12 @@ def chat_with_ollama(shared_state):
                 if shared_state["running"]:
                     shared_state["expression"] = "listening"
 
+        except requests.Timeout:
+            print("[CHAT] Ollama took too long to respond. Please try again.")
+            if shared_state["running"]:
+                shared_state["expression"] = "listening"
+            continue
+        
         except requests.RequestException as e:
             print(f"[CHAT] Ollama request failed: {e}")
             shared_state["expression"] = "idle"
@@ -139,6 +147,13 @@ def chat_with_ollama(shared_state):
             shared_state["expression"] = "idle"
             shared_state["chat_active"] = False
             break
+
+        except KeyboardInterrupt:
+            print("\n[CHAT] Interrupted by user.")
+            shared_state["expression"] = "idle"
+            shared_state["chat_active"] = False
+            shared_state["running"] = False
+            break        
 
         except Exception as e:
             # Catch any unexpected TTS or parsing issue
