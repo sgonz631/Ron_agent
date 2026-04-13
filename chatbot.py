@@ -7,6 +7,7 @@ from pathlib import Path
 
 # Text-to-speech helper
 import piper_tts
+import whisper_stt
 
 
 # -------------------------------------------------------------------
@@ -47,10 +48,24 @@ def chat_with_ollama(shared_state):
 
     # Main chat loop
     while shared_state["running"]:
-        user_text = input("You: ").strip()
+    # -----------------------------------------------------------
+    # INPUT SELECTION
+    # Default = voice
+    # If space bar was pressed in agent_ron GUI, use text once
+    # -----------------------------------------------------------
+
+        if shared_state.get("force_text_input", False):
+            shared_state["force_text_input"] = False
+            user_text = input("You (text): ").strip()
+        else:
+            print("[VOICE] Speak now...")
+            shared_state["expression"] = "listening"
+            user_text = whisper_stt.listen_and_transcribe(duration=5).strip()
+            if user_text:
+                print(f"You (voice): {user_text}")
+
         command = user_text.lower()
 
-        # Ignore empty input
         if not user_text:
             shared_state["expression"] = "listening"
             continue

@@ -107,8 +107,10 @@ def launch_GUI(shared_state):
                 running = False
                 shared_state["running"] = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                running = False
-                shared_state["running"] = False
+                shared_state["force_text_input"] = True  #lets the operator press space once and force the next interaction to be typed.
+                print("[INPUT] Text input requested for next turn.")
+                #running = False
+                #shared_state["running"] = False
 
         new_expression = shared_state["expression"]
 
@@ -142,7 +144,8 @@ def main():
     shared_state = {
         "expression": "idle",
         "running": True,
-        "chat_active": False
+        "chat_active": False,
+        "force_text_input": False,
     }
 
     gui_thread = threading.Thread(target=launch_GUI, args=(shared_state,), daemon=True)
