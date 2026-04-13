@@ -18,10 +18,10 @@ STYLE_SYNONYMS = {
     "sandals": ["sandals", "slides", "flip flops"]
 }
 
-KNOWN_BRANDS = [
+KNOWN_BRANDS = sorted([
     "nike", "adidas", "puma", "reebok", "asics",
     "new balance", "converse", "vans", "under armour"
-]
+], key=len, reverse=True)
 
 
 def normalize_style(style_text: str) -> str:
@@ -41,7 +41,7 @@ def fallback_extract(user_text: str) -> dict:
     text = user_text.lower()
 
     size = None
-    size_match = re.search(r'\bsize\s*(\d+(?:\.\d+)?)\b', text)
+    size_match = re.search(r'\b(?:size\s*)?(\d+(?:\.\d+)?)\b', text)
     if size_match:
         size = float(size_match.group(1))
 
@@ -146,8 +146,8 @@ def search_inventory(filters: dict) -> list:
     params = []
 
     if filters.get("brand"):
-        query += " AND LOWER(brand) = ?"
-        params.append(filters["brand"])
+        query += " AND LOWER(brand) LIKE ?"
+        params.append(f"%{filters['brand']}%")
 
     if filters.get("size") is not None:
         query += " AND size = ?"
