@@ -258,8 +258,8 @@ def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
             line += f" | promotion {promotion}"
         lines.append(line)
 
-    if len(rows) > 8:
-        lines.append(f"- plus {len(rows) - 8} more matching result(s)")
+    if len(rows) > 3:
+        lines.append(f"- plus {len(rows) - 3} more matching result(s)")
 
     return "\n".join(lines)
 
