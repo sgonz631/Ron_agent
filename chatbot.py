@@ -19,6 +19,9 @@ import inventory_terminal as inventory
 #time helpers for state tracking
 from state_utils import set_expression, print_state_summary
 
+#management of file paths
+from pathlib import Path
+import random
 
 
 # -------------------------------------------------------------------
@@ -29,6 +32,15 @@ OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
 OLLAMA_MODEL = "gemma3:4b"
 
+THINKING_AUDIO_DIR = Path("/home/pi/Ronnor/RONNOR/phrases/thinking")
+
+THINKING_CAPTIONS = [
+    "RONNOR: Let me think about that...",
+    "RONNOR: One moment while I check...",
+    "RONNOR: I am looking into that now...",
+    "RONNOR: Let me find the best answer...",
+    "RONNOR: Thinking..."
+]
 
 # -------------------------------------------------------------------
 # TEXT NORMALIZATION / EXIT PHRASE DETECTION
