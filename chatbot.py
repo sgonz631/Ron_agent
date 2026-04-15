@@ -255,7 +255,7 @@ def chat_with_ollama(shared_state):
             "role": "system",
             "content": (
                 "You are Ronnor, a concise and helpful voice assistant running on a Raspberry Pi. "
-                "Speak naturally for voice conversation. "
+                "Be conversational and friendly, but not overly chatty."
                 "Keep responses brief and clear unless the user asks for more detail. "
                 "Do not include stage directions, sound effects, or parenthetical cues. "
                 "If you are given inventory facts, use only those facts. "
@@ -384,9 +384,9 @@ def chat_with_ollama(shared_state):
 
                 if best_pick:
                     best_pick_text = (
-                        f"\n\nBest pick: {best_pick[0]} {best_pick[1]}, "
+                        f"\n\nBest recommended option: {best_pick[0]} {best_pick[1]}, "
                         f"size {best_pick[2]}, color {best_pick[3]}, "
-                        f"price ${best_pick[4]:.0f}, qty {best_pick[5]}"
+                        f"price ${best_pick[4]:.0f}, qty {best_pick[5]}."
                     )
                 else:
                     best_pick_text = ""
@@ -394,12 +394,21 @@ def chat_with_ollama(shared_state):
                 inventory_prompt_messages = [
                     {
                         "role": "system",
-                        "content": messages[0]["content"]
+                        "content": (
+                            "You are Ronnor, a warm and helpful in-store shoe assistant. "
+                            "Use only the inventory facts provided. "
+                            "Speak naturally like a real store associate helping a customer in person. "
+                            "Start with the best match, but do not sound robotic or list-only. "
+                            "Keep responses brief, around 1 to 2 sentences. "
+                            "You may add a short helpful remark or follow-up question. "
+                            "Do not invent products, sizes, prices, availability, or promotions. "
+                            "Do not include stage directions or sound effects."
+                        )
                     },
                     {
                         "role": "user",
                         "content": (
-                            "Use these inventory facts to answer naturally and briefly.\n\n"
+                            "Answer the customer naturally using these inventory facts.\n\n"
                             + inventory_data["context"]
                             + best_pick_text
                         )
