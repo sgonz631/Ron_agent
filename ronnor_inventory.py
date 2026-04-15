@@ -53,14 +53,19 @@ def extract_size(user_text: str):
     if match:
         return float(match.group(1))
 
-    match = re.search(r"\b(\d+(?:\.\d+)?)\b", text)
-    if match:
+    matches = re.findall(r"\b(\d+(?:\.\d+)?)\b", text)
+    candidates = []
+
+    for m in matches:
         try:
-            value = float(match.group(1))
+            value = float(m)
             if 4 <= value <= 18:
-                return value
+                candidates.append(value)
         except ValueError:
             pass
+
+    if len(candidates) == 1:
+        return candidates[0]
 
     return None
 
@@ -189,12 +194,10 @@ def search_inventory(filters: dict) -> list:
 
 
 def rank_inventory_rows(rows: list, filters: dict) -> list:
-    """
-    Rank rows so the best matches appear first.
-    More matching tags, requested promotions, and higher stock score better.
-    """
     desired_tags = set(filters.get("tags", []))
     wants_promotions = filters.get("wants_promotions", False)
+    requested_brand = filters.get("brand", "")
+    requested_size = filters.get("size", None)
 
     def score(row):
         brand, model, size, color, cost, qty, location, tags, promotion = row
@@ -204,12 +207,20 @@ def rank_inventory_rows(rows: list, filters: dict) -> list:
             tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
 
         score_value = 0
+
+        if requested_brand and brand.lower() == requested_brand:
+            score_value += 25
+
+        if requested_size is not None and size == requested_size:
+            score_value += 20
+
         score_value += len(desired_tags.intersection(tag_set)) * 10
 
         if wants_promotions and promotion and promotion.strip():
             score_value += 8
 
         score_value += min(qty, 10)
+
         return score_value
 
     return sorted(rows, key=score, reverse=True)
@@ -222,18 +233,16 @@ def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
     if not rows:
         return (
             f"User request: {user_text}\n"
-            f"Parsed filters: {filters}\n"
             "Inventory results: none\n"
         )
 
     lines = [
         f"User request: {user_text}",
-        f"Parsed filters: {filters}",
         f"Inventory result count: {len(rows)}",
         "Inventory results:"
     ]
 
-    for row in rows[:8]:
+    for row in rows[:3]:
         brand, model, size, color, cost, qty, location, tags, promotion = row
         line = (
             f"- {brand} {model} | size {size} | color {color} | "
@@ -247,8 +256,8 @@ def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
             line += f" | promotion {promotion}"
         lines.append(line)
 
-    if len(rows) > 8:
-        lines.append(f"- plus {len(rows) - 8} more matching result(s)")
+    if len(rows) > 3:
+        lines.append(f"- plus {len(rows) - 3} more matching result(s)")
 
     return "\n".join(lines)
 

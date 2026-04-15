@@ -25,7 +25,7 @@ from state_utils import set_expression, print_state_summary
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
-OLLAMA_MODEL = "gemma3:4b"
+OLLAMA_MODEL = "gemma3:4b-q4_K_M"
 
 THINKING_AUDIO_DIR = Path("/home/pi/Ronnor/RONNOR/phrases/thinking")
 
@@ -167,6 +167,15 @@ def stop_thinking_audio_loop(stop_event):
     stop_event.set()
 
 def merge_with_session_preferences(filters: dict, session_preferences: dict) -> dict:
+    if filters.get("wants_promotions"):
+        return {
+            "brand": filters.get("brand", ""),
+            "size": filters.get("size"),
+            "color": filters.get("color", ""),
+            "tags": list(filters.get("tags", [])),
+            "wants_promotions": True,
+        }
+
     merged = {
         "brand": filters.get("brand") or session_preferences.get("brand"),
         "size": filters.get("size") if filters.get("size") is not None else session_preferences.get("size"),
@@ -210,6 +219,23 @@ def clear_caption(shared_state):
     shared_state["caption_speaker"] = ""
     shared_state["caption_start_time"] = 0.0
     shared_state["caption_duration"] = 0.0
+
+def should_reset_inventory_preferences(user_text: str) -> bool:
+    text = normalize_user_text(user_text)
+
+    reset_phrases = [
+        "what shoes are on promotion",
+        "what other shoes do you have",
+        "now im interested in",
+        "any size or style",
+        "show me all",
+        "start over",
+        "something else",
+        "other shoes",
+    ]
+
+    return any(phrase in text for phrase in reset_phrases)
+
 # -------------------------------------------------------------------
 # CHAT LOOP
 # -------------------------------------------------------------------
@@ -226,9 +252,12 @@ def chat_with_ollama(shared_state):
             "role": "system",
             "content": (
                 "You are Ronnor, a concise and helpful voice assistant running on a Raspberry Pi. "
-                "Respond naturally for spoken conversation. "
-                "Keep answers brief unless the user asks for more detail. "
-                "Do not include stage directions, sound effects, or parenthetical cues."
+                "Speak naturally for voice conversation. "
+                "Keep responses brief and clear unless the user asks for more detail. "
+                "Do not include stage directions, sound effects, or parenthetical cues. "
+                "If you are given inventory facts, use only those facts. "
+                "Do not invent products, sizes, prices, availability, or promotions. "
+                "Recommend the best match first when appropriate."
             )
         }
     ]
@@ -305,6 +334,14 @@ def chat_with_ollama(shared_state):
             raw_filters = ronnor_inventory.get_inventory_filters(user_text)
 
             if raw_filters:
+                if should_reset_inventory_preferences(user_text):
+                    session_preferences = {
+                        "brand": None,
+                        "size": None,
+                        "color": None,
+                        "tags": []
+                    }
+                    
                 merged_filters = merge_with_session_preferences(
                     raw_filters,
                     session_preferences
@@ -314,6 +351,8 @@ def chat_with_ollama(shared_state):
                     ronnor_inventory.search_inventory(merged_filters),
                     merged_filters
                 )
+
+                best_pick = merged_rows[0] if merged_rows else None
 
                 merged_context = ronnor_inventory.build_inventory_context(
                     user_text,
@@ -340,25 +379,27 @@ def chat_with_ollama(shared_state):
                 set_expression(shared_state, "thinking")
                 thinking_audio_thread, thinking_audio_stop = start_thinking_audio_loop(shared_state)
 
+                if best_pick:
+                    best_pick_text = (
+                        f"\n\nBest pick: {best_pick[0]} {best_pick[1]}, "
+                        f"size {best_pick[2]}, color {best_pick[3]}, "
+                        f"price ${best_pick[4]:.0f}, qty {best_pick[5]}"
+                    )
+                else:
+                    best_pick_text = ""
+
                 inventory_prompt_messages = [
                     {
                         "role": "system",
-                        "content": (
-                            "You are Ronnor, a helpful in-store shoe assistant. "
-                            "Speak naturally and briefly, like a real store associate. "
-                            "Use only the inventory facts provided. "
-                            "Do not invent products, sizes, prices, availability, or promotions. "
-                            "Recommend the best matches first instead of listing everything. "
-                            "Keep responses to 1 to 3 short sentences. "
-                            "If the request is broad, suggest one helpful way to narrow it down, such as size, style, or brand. "
-                            "If the user already gave a preference like size or brand, respect it. "
-                            "Avoid repeating the full user request. "
-                            "Do not include stage directions, sound effects, or parenthetical cues."
-                        )
+                        "content": messages[0]["content"]
                     },
                     {
                         "role": "user",
-                        "content": inventory_data["context"]
+                        "content": (
+                            "Use these inventory facts to answer naturally and briefly.\n\n"
+                            + inventory_data["context"]
+                            + best_pick_text
+                        )
                     }
                 ]
 
@@ -395,7 +436,11 @@ def chat_with_ollama(shared_state):
                         + ", ".join(names)
                         + "."
                     )
-            set_caption(shared_state, "RONNOR",inventory_reply,piper_tts.estimate_speech_duration(inventory_reply))
+            set_caption(
+                shared_state,
+                "RONNOR",
+                inventory_reply,piper_tts.estimate_speech_duration(inventory_reply)
+            )
 
             try:
                 #set_caption(shared_state, "RONNOR",inventory_reply,piper_tts.estimate_speech_duration(inventory_reply))
