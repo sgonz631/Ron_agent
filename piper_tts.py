@@ -105,6 +105,16 @@ def _validate_paths(voice_model: Path) -> None:
     if not Path(ESPEAK_DATA_PATH).is_dir():
         raise FileNotFoundError(f"espeak-ng data path not found: {ESPEAK_DATA_PATH}")
 
+#Caption timing helper
+def estimate_speech_duration(text: str) -> float:
+    """
+    Rough estimate of speech duration in seconds.
+    Useful for caption auto-scroll timing.
+    """
+    words = len(text.split())
+    seconds = words / 2.5
+    return max(2.0, seconds)
+
 
 # ---------- TTS ----------
 def speak_text(text: str, voice_model: Optional[str | Path] = None) -> bool:

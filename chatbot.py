@@ -152,8 +152,12 @@ def handle_inventory_turn(user_text: str, shared_state) -> bool:
     if missing:
         pending_field = missing
         reply = inventory.question_for_field(missing)
-
         shared_state["caption_text"] = f"RONNOR: {shorten_caption(reply)}"
+        shared_state["caption_text"] = f"RONNOR: {reply}"
+        shared_state["caption_speaker"] = "RONNOR"
+        shared_state["caption_start_time"] = time.time()
+        shared_state["caption_duration"] = piper_tts.estimate_speech_duration(reply)
+        
         safe_print(f"Ronnor: {reply}")
         set_expression(shared_state, "speaking")
 
@@ -181,6 +185,7 @@ def handle_inventory_turn(user_text: str, shared_state) -> bool:
 
     safe_print(f"Ronnor: {reply}")
     set_expression(shared_state, "speaking")
+
     try:
         piper_tts.speak_text(reply)
     finally:
@@ -190,7 +195,12 @@ def handle_inventory_turn(user_text: str, shared_state) -> bool:
     if rows:
         followup = "Want to search for another pair?"
         
-        shared_state["caption_text"] = f"RONNOR: {shorten_caption(followup)}" #caption
+        #caption
+        shared_state["caption_text"] = f"RONNOR: {followup}"
+        shared_state["caption_speaker"] = "RONNOR"
+        shared_state["caption_start_time"] = time.time()
+        shared_state["caption_duration"] = piper_tts.estimate_speech_duration(followup)
+        
         safe_print(f"Ronnor: {followup}")
         set_expression(shared_state, "speaking")
         
@@ -206,9 +216,16 @@ def handle_inventory_turn(user_text: str, shared_state) -> bool:
         shared_state["inventory_pending_field"] = None
     else:
         followup = "I can check similar options if you want, maybe another color, brand, or budget."
-        shared_state["caption_text"] = f"RONNOR: {shorten_caption(followup)}"
+        #shared_state["caption_text"] = f"RONNOR: {shorten_caption(followup)}"
+        
+        shared_state["caption_text"] = f"RONNOR: {followup}"
+        shared_state["caption_speaker"] = "RONNOR"
+        shared_state["caption_start_time"] = time.time()
+        shared_state["caption_duration"] = piper_tts.estimate_speech_duration(followup)
+
         safe_print(f"Ronnor: {followup}")
         set_expression(shared_state, "speaking")
+
         try:
             piper_tts.speak_text(followup)
         finally:
@@ -288,8 +305,13 @@ def chat_with_ollama(shared_state):
         if not user_text:
             shared_state["expression"] = "listening"
             continue
+
         # Show user caption and keep it until Ronnor replies
         shared_state["caption_text"] = f"USER: {shorten_caption(user_text)}"
+        shared_state["caption_text"] = f"USER: {user_text}"
+        shared_state["caption_speaker"] = "USER"
+        shared_state["caption_start_time"] = 0.0
+        shared_state["caption_duration"] = 0.0
        
         # -----------------------------------------------------------
         # END CHAT ONLY
@@ -308,6 +330,9 @@ def chat_with_ollama(shared_state):
                 set_expression(shared_state, "idle")
 
             shared_state["caption_text"] = ""
+            shared_state["caption_speaker"] = ""
+            shared_state["caption_start_time"] = 0.0
+            shared_state["caption_duration"] = 0.0
             shared_state["chat_active"] = False
             break
 
@@ -327,9 +352,13 @@ def chat_with_ollama(shared_state):
                 set_expression(shared_state, "idle")
 
             shared_state["caption_text"] = ""
+            shared_state["caption_speaker"] = ""
+            shared_state["caption_start_time"] = 0.0
+            shared_state["caption_duration"] = 0.0
             shared_state["chat_active"] = False
             shared_state["running"] = False
             break
+            
 
         # -----------------------------------------------------------
         # INVENTORY MODE
@@ -345,6 +374,12 @@ def chat_with_ollama(shared_state):
             shared_state["inventory_history"] = []
             shared_state["inventory_pending_field"] = None
             shared_state["expression"] = "listening"
+
+            #clear captions on errors
+            shared_state["caption_text"] = ""
+            shared_state["caption_speaker"] = ""
+            shared_state["caption_start_time"] = 0.0
+            shared_state["caption_duration"] = 0.0
             continue
 
         # Save user's message into conversation memory
@@ -376,7 +411,12 @@ def chat_with_ollama(shared_state):
 
             data = response.json()
             assistant_text = data["message"]["content"].strip()
-            shared_state["caption_text"] = f"RONNOR: {shorten_caption(assistant_text)}"
+            
+            # Show Ronnor caption and enable auto-scroll timing
+            shared_state["caption_text"] = f"RONNOR: {assistant_text}"
+            shared_state["caption_speaker"] = "RONNOR"
+            shared_state["caption_start_time"] = time.time()
+            shared_state["caption_duration"] = piper_tts.estimate_speech_duration(assistant_text)
 
             # Print response safely
             try:
@@ -418,6 +458,12 @@ def chat_with_ollama(shared_state):
             set_expression(shared_state, "idle")
             shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
+
+            #clear captions on errors
+            shared_state["caption_text"] = ""
+            shared_state["caption_speaker"] = ""
+            shared_state["caption_start_time"] = 0.0
+            shared_state["caption_duration"] = 0.0
             break
 
         except KeyError:
@@ -440,6 +486,12 @@ def chat_with_ollama(shared_state):
             set_expression(shared_state, "idle")
             shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
+
+            #clear captions on errors
+            shared_state["caption_text"] = ""
+            shared_state["caption_speaker"] = ""
+            shared_state["caption_start_time"] = 0.0
+            shared_state["caption_duration"] = 0.0
             break
 
 
@@ -454,6 +506,11 @@ def is_ollama_running():
         response = requests.get(OLLAMA_TAGS_URL, timeout=2)
         return response.status_code == 200
     except requests.RequestException:
+        #clear captions on errors
+        shared_state["caption_text"] = ""
+        shared_state["caption_speaker"] = ""
+        shared_state["caption_start_time"] = 0.0
+        shared_state["caption_duration"] = 0.0
         return False
 
 
@@ -499,6 +556,11 @@ def ensure_model():
 
     except Exception as e:
         print(f"[OLLAMA] Could not verify installed models: {e}")
+        #clear captions on errors
+        shared_state["caption_text"] = ""
+        shared_state["caption_speaker"] = ""
+        shared_state["caption_start_time"] = 0.0
+        shared_state["caption_duration"] = 0.0
 
     print(f"[OLLAMA] Pulling model {OLLAMA_MODEL}...")
     subprocess.run(["ollama", "pull", OLLAMA_MODEL], check=True)
@@ -529,6 +591,12 @@ def warmup_model():
 
     except Exception as e:
         print(f"[OLLAMA] Warmup failed: {e}")
+        
+        #clear captions on errors
+        shared_state["caption_text"] = ""
+        shared_state["caption_speaker"] = ""
+        shared_state["caption_start_time"] = 0.0
+        shared_state["caption_duration"] = 0.0
 
 
 # -------------------------------------------------------------------
