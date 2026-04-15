@@ -38,12 +38,14 @@ def normalize_user_text(text: str) -> str:
     Normalize text for intent matching:
     - lowercase
     - remove accents
+    - remove asterisks
     - remove punctuation
     - collapse spaces
     """
     text = text.lower()
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace("*", "")
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
