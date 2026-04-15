@@ -89,10 +89,12 @@ def chat_with_ollama(shared_state):
     messages = [
         {
             "role": "system",
-            "content": "You are Ronnor, a concise helpful voice assistant running on a Raspberry Pi."
-            "Respond naturally for spoken conversation. "
-            "Do not include stage directions, sound effects, or parenthetical cues like "
-            "'(brief pause)', '(static)', or '(whirring sound)'."
+            "content": (
+                "You are Ronnor, a concise and helpful voice assistant running on a Raspberry Pi. "
+                "Respond naturally for spoken conversation. "
+                "Keep answers brief unless the user asks for more detail. "
+                "Do not include stage directions, sound effects, or parenthetical cues."
+            )
         }
     ]
 
@@ -172,16 +174,68 @@ def chat_with_ollama(shared_state):
             shared_state["running"] = False
             break
 
-        # -------------------------------------------------------
+                # -------------------------------------------------------
         # INVENTORY TOOL ROUTING
         # -------------------------------------------------------
-        inventory_reply = None
+        inventory_data = None
         try:
-            inventory_reply = ronnor_inventory.handle_inventory_query(user_text)
+            inventory_data = ronnor_inventory.get_inventory_context(user_text)
         except Exception as e:
             print(f"[INVENTORY] Inventory lookup failed: {e}")
 
-        if inventory_reply:
+        if inventory_data:
+            try:
+                set_expression(shared_state, "thinking")
+
+                inventory_prompt_messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are Ronnor, a helpful in-store shoe assistant. "
+                            "Reply naturally and briefly, like a real store associate speaking out loud. "
+                            "Use ONLY the inventory facts provided. "
+                            "Do not invent products, sizes, prices, colors, promotions, or stock. "
+                            "If there are matches, summarize the best options in 1 to 3 short sentences. "
+                            "Do not list every item unless the user explicitly asks for all of them. "
+                            "If there are no matches, say that clearly and offer a helpful next step. "
+                            "Do not include stage directions, sound effects, or parenthetical cues."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": inventory_data["context"]
+                    }
+                ]
+
+                response = requests.post(
+                    OLLAMA_CHAT_URL,
+                    json={
+                        "model": OLLAMA_MODEL,
+                        "messages": inventory_prompt_messages,
+                        "stream": False
+                    },
+                    timeout=120
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                inventory_reply = data["message"]["content"].strip()
+
+            except Exception as e:
+                print(f"[INVENTORY] Natural phrasing failed, using fallback: {e}")
+
+                rows = inventory_data["rows"]
+                if not rows:
+                    inventory_reply = "I could not find any matching shoes in inventory."
+                else:
+                    top = rows[:3]
+                    names = [f"{r[0]} {r[1]} in size {r[2]}" for r in top]
+                    inventory_reply = (
+                        f"I found {len(rows)} matching options, including "
+                        + ", ".join(names)
+                        + "."
+                    )
+
             try:
                 print(f"Ronnor: {inventory_reply}")
             except UnicodeEncodeError:
