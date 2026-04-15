@@ -6,6 +6,8 @@ import subprocess
 import time
 import re
 import unicodedata
+import random
+from pathlib import Path
 
 # Text-to-speech helper
 import piper_tts
@@ -25,6 +27,15 @@ OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
 OLLAMA_MODEL = "gemma3:4b"
 
+THINKING_AUDIO_DIR = Path("/home/pi/Ronnor/RONNOR/phrases/thinking")
+
+THINKING_CAPTIONS = [
+    "Let me think about that...",
+    "One moment while I check...",
+    "I am looking into that now...",
+    "Let me find the best answer...",
+    "Thinking..."
+]
 
 # -------------------------------------------------------------------
 # TEXT NORMALIZATION / EXIT PHRASE DETECTION
@@ -82,6 +93,55 @@ def update_session_preferences(session_preferences: dict, filters: dict) -> None
             if tag not in session_preferences["tags"]:
                 session_preferences["tags"].append(tag)
 
+def start_random_thinking_audio(shared_state):
+    """
+    Start one random thinking audio file in the background.
+    Also sets a random thinking caption.
+    Returns the subprocess handle, or None if nothing could be played.
+    """
+    if not THINKING_AUDIO_DIR.exists():
+        return None
+
+    audio_files = sorted(
+        [p for p in THINKING_AUDIO_DIR.iterdir() if p.suffix.lower() == ".wav"]
+    )
+
+    if not audio_files:
+        return None
+
+    selected_audio = random.choice(audio_files)
+    selected_caption = random.choice(THINKING_CAPTIONS)
+
+    set_caption(shared_state, "RONNOR", selected_caption, duration=9999.0)
+
+    try:
+        proc = subprocess.Popen(
+            ["aplay", str(selected_audio)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return proc
+    except Exception as e:
+        print(f"[AUDIO] Failed to start thinking audio: {e}")
+        return None
+
+
+def stop_thinking_audio(proc):
+    """
+    Stop the background thinking audio if it is still running.
+    """
+    if proc is None:
+        return
+
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    except Exception as e:
+        print(f"[AUDIO] Failed to stop thinking audio: {e}")
 
 def merge_with_session_preferences(filters: dict, session_preferences: dict) -> dict:
     merged = {
@@ -250,8 +310,11 @@ def chat_with_ollama(shared_state):
             print(f"[INVENTORY] Inventory lookup failed: {e}")
 
         if inventory_data:
+            thinking_audio_proc = None
+
             try:
                 set_expression(shared_state, "thinking")
+                thinking_audio_proc = start_random_thinking_audio(shared_state)
 
                 inventory_prompt_messages = [
                     {
@@ -287,6 +350,9 @@ def chat_with_ollama(shared_state):
                 response.raise_for_status()
 
                 data = response.json()
+                # Stop thinking audio as soon as Ollama finishes
+                stop_thinking_audio(thinking_audio_proc)
+
                 inventory_reply = data["message"]["content"].strip()
 
             except Exception as e:
@@ -331,6 +397,7 @@ def chat_with_ollama(shared_state):
 
         # Normal Ollama chat path
         messages.append({"role": "user", "content": user_text})
+        thinking_audio_proc = None
 
         try:
             if shared_state.get("interrupt_requested", False):
@@ -340,6 +407,7 @@ def chat_with_ollama(shared_state):
                 continue
 
             set_expression(shared_state, "thinking")
+            thinking_audio_proc = start_random_thinking_audio(shared_state)
 
             response = requests.post(
                 OLLAMA_CHAT_URL,
@@ -353,6 +421,8 @@ def chat_with_ollama(shared_state):
             response.raise_for_status()
 
             data = response.json()
+            # Stop thinking audio as soon as Ollama finishes
+            stop_thinking_audio(thinking_audio_proc)
             assistant_text = data["message"]["content"].strip()
 
             set_caption(
@@ -384,12 +454,14 @@ def chat_with_ollama(shared_state):
                     shared_state["expression"] = "listening"
 
         except requests.Timeout:
+            stop_thinking_audio(thinking_audio_proc)
             print("[CHAT] Ollama took too long to respond. Please try again.")
             if shared_state["running"]:
                 shared_state["expression"] = "listening"
             continue
 
         except requests.RequestException as e:
+            stop_thinking_audio(thinking_audio_proc)
             print(f"[CHAT] Ollama request failed: {e}")
             set_expression(shared_state, "idle")
             clear_caption(shared_state)
@@ -397,6 +469,7 @@ def chat_with_ollama(shared_state):
             break
 
         except KeyError:
+            stop_thinking_audio(thinking_audio_proc)
             print("[CHAT] Unexpected Ollama response format.")
             set_expression(shared_state, "idle")
             clear_caption(shared_state)
@@ -404,6 +477,7 @@ def chat_with_ollama(shared_state):
             break
 
         except KeyboardInterrupt:
+            stop_thinking_audio(thinking_audio_proc)
             print("\n[CHAT] Interrupted by user.")
             set_expression(shared_state, "idle")
             clear_caption(shared_state)
@@ -412,6 +486,7 @@ def chat_with_ollama(shared_state):
             break
 
         except Exception as e:
+            stop_thinking_audio(thinking_audio_proc)
             print(f"[CHAT] Unexpected error: {e}")
             clear_caption(shared_state)
             set_expression(shared_state, "idle")
