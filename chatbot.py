@@ -30,11 +30,14 @@ OLLAMA_MODEL = "gemma3:1b"
 THINKING_AUDIO_DIR = Path("/home/pi/Ronnor/RONNOR/phrases/thinking")
 
 THINKING_CAPTIONS = [
-    "Let me think about that...",
-    "One moment while I check...",
-    "I am looking into that now...",
-    "Let me find the best answer...",
-    "Thinking..."
+    "Awesome! Let me check that for you...",
+    "I'm working on it...",
+    "Just a moment, please...",
+    "One moment...",
+    "On it...",
+    "Right away...",
+    "Uno momento por favor...",
+    "Un momento..."
 ]
 
 # -------------------------------------------------------------------
