@@ -128,7 +128,9 @@ def parse_inventory_request(user_text: str) -> dict:
         "size": extract_size(text),
         "color": extract_color(text),
         "tags": extract_tags(text),
-        "wants_promotions": any(word in text for word in ["promotion", "promotions", "deal", "deals", "discount"]),
+        "wants_promotions": any(
+            word in text for word in ["promotion", "promotions", "deal", "deals", "discount"]
+        ),
     }
 
 
@@ -170,6 +172,35 @@ def search_inventory(filters: dict) -> list:
     rows = cur.fetchall()
     conn.close()
     return rows
+
+
+def rank_inventory_rows(rows: list, filters: dict) -> list:
+    """
+    Rank rows so the best matches appear first.
+    More matching tags, requested promotions, and higher stock score better.
+    """
+    desired_tags = set(filters.get("tags", []))
+    wants_promotions = filters.get("wants_promotions", False)
+
+    def score(row):
+        brand, model, size, color, cost, qty, location, tags, promotion = row
+        tag_set = set()
+
+        if tags:
+            tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
+
+        score_value = 0
+
+        score_value += len(desired_tags.intersection(tag_set)) * 10
+
+        if wants_promotions and promotion and promotion.strip():
+            score_value += 8
+
+        score_value += min(qty, 10)
+
+        return score_value
+
+    return sorted(rows, key=score, reverse=True)
 
 
 def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
@@ -220,7 +251,7 @@ def get_inventory_context(user_text: str):
         return None
 
     filters = parse_inventory_request(user_text)
-    rows = search_inventory(filters)
+    rows = rank_inventory_rows(search_inventory(filters), filters)
     context = build_inventory_context(user_text, filters, rows)
 
     return {
