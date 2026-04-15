@@ -111,7 +111,22 @@ def clean_text_for_tts(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
+def set_caption(shared_state, speaker: str, text: str, duration: float = 0.0):
+    """
+    Update the on-screen caption in one place.
+    speaker: "USER" or "RONNOR"
+    duration: use 0.0 for user captions, or speech duration for Ronnor
+    """
+    shared_state["caption_text"] = f"{speaker}: {text}"
+    shared_state["caption_speaker"] = speaker
+    shared_state["caption_start_time"] = time.time() if duration > 0 else 0.0
+    shared_state["caption_duration"] = duration
 
+def clear_caption(shared_state):
+    shared_state["caption_text"] = ""
+    shared_state["caption_speaker"] = ""
+    shared_state["caption_start_time"] = 0.0
+    shared_state["caption_duration"] = 0.0
 # -------------------------------------------------------------------
 # CHAT LOOP
 # -------------------------------------------------------------------
@@ -167,7 +182,10 @@ def chat_with_ollama(shared_state):
         if not user_text:
             shared_state["expression"] = "listening"
             continue
-
+        # Show the user's speech as a caption on screen until Ronnor responds
+        set_caption(shared_state, "USER", user_text)
+        
+        #BYE PHRASES - END CHAT BUT KEEP RUNNING FOR NEXT WAKE WORD
         if command in {"bye", "stop", "quit"} or is_end_chat_phrase(user_text):
             print("[CHAT] Ending chat mode.")
             try:
@@ -178,6 +196,7 @@ def chat_with_ollama(shared_state):
             finally:
                 set_expression(shared_state, "idle")
 
+            clear_caption(shared_state)
             shared_state["chat_active"] = False
             break
 
@@ -190,7 +209,7 @@ def chat_with_ollama(shared_state):
                 print(f"[TTS] Shutdown speech failed: {e}")
             finally:
                 set_expression(shared_state, "idle")
-
+            clear_caption(shared_state)
             shared_state["chat_active"] = False
             shared_state["running"] = False
             break
@@ -282,8 +301,10 @@ def chat_with_ollama(shared_state):
                         + ", ".join(names)
                         + "."
                     )
+            set_caption(shared_state, "RONNOR",inventory_reply,piper_tts.estimate_speech_duration(inventory_reply))
 
             try:
+                #set_caption(shared_state, "RONNOR",inventory_reply,piper_tts.estimate_speech_duration(inventory_reply))
                 print(f"Ronnor: {inventory_reply}")
             except UnicodeEncodeError:
                 fallback_text = inventory_reply.encode("ascii", errors="replace").decode("ascii")
@@ -332,6 +353,13 @@ def chat_with_ollama(shared_state):
             data = response.json()
             assistant_text = data["message"]["content"].strip()
 
+            set_caption(
+                shared_state,
+                "RONNOR",
+                assistant_text,
+                piper_tts.estimate_speech_duration(assistant_text)
+            )
+
             try:
                 print(f"Ronnor: {assistant_text}")
             except UnicodeEncodeError:
@@ -362,24 +390,28 @@ def chat_with_ollama(shared_state):
         except requests.RequestException as e:
             print(f"[CHAT] Ollama request failed: {e}")
             set_expression(shared_state, "idle")
+            clear_caption(shared_state)
             shared_state["chat_active"] = False
             break
 
         except KeyError:
             print("[CHAT] Unexpected Ollama response format.")
             set_expression(shared_state, "idle")
+            clear_caption(shared_state)
             shared_state["chat_active"] = False
             break
 
         except KeyboardInterrupt:
             print("\n[CHAT] Interrupted by user.")
             set_expression(shared_state, "idle")
+            clear_caption(shared_state)
             shared_state["chat_active"] = False
             shared_state["running"] = False
             break
 
         except Exception as e:
             print(f"[CHAT] Unexpected error: {e}")
+            clear_caption(shared_state)
             set_expression(shared_state, "idle")
             shared_state["chat_active"] = False
             break
@@ -503,6 +535,10 @@ if __name__ == "__main__":
         "chat_active": True,
         "force_text_input": False,
         "interrupt_requested": False,
+        "caption_text": "",
+        "caption_start_time": 0.0,
+        "caption_duration": 0.0,
+        "caption_speaker": "",
     }
 
     setup_ollama()

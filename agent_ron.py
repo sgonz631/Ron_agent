@@ -23,6 +23,9 @@ import chatbot
 #Time Helpers
 from state_utils import set_expression, print_state_summary
 
+#for captions
+import time
+import textwrap
 
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
 SCREEN_WIDTH = 800
@@ -31,6 +34,14 @@ FRAME_DELAY_MS = 700
 BACKGROUND_COLOR = (0, 0, 0)
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
+#captions
+CAPTION_FONT_SIZE = 28
+CAPTION_BOX_HEIGHT = 140
+CAPTION_PADDING = 16
+CAPTION_TEXT_COLOR = (255, 255, 255)
+CAPTION_BOX_COLOR = (0, 0, 0)
+CAPTION_BOX_ALPHA = 180
+CAPTION_MAX_VISIBLE_LINES = 3
 
 def load_face_folders(root_folder):
     expressions = {}
@@ -75,8 +86,56 @@ def draw_centered(screen, image, bg_color):
     screen.fill(bg_color)
     rect = image.get_rect(center=screen.get_rect().center)
     screen.blit(image, rect)
-    pygame.display.flip()
 
+def draw_caption(screen, shared_state):
+    """
+    Draw one caption at a time.
+    If the caption has more than 3 lines and Ronnor is speaking,
+    auto-scroll downward as the speech progresses.
+    """
+    caption_text = shared_state.get("caption_text", "")
+    if not caption_text:
+        return
+
+    screen_width, screen_height = screen.get_size()
+    font = pygame.font.SysFont(None, CAPTION_FONT_SIZE)
+
+    # Wrap text into multiple lines
+    max_chars_per_line = 42
+    lines = textwrap.wrap(caption_text, width=max_chars_per_line)
+
+    # Create caption background
+    caption_surface = pygame.Surface((screen_width, CAPTION_BOX_HEIGHT), pygame.SRCALPHA)
+    caption_surface.fill((*CAPTION_BOX_COLOR, CAPTION_BOX_ALPHA))
+
+    total_lines = len(lines)
+    visible_lines = CAPTION_MAX_VISIBLE_LINES
+
+    # Default: start from the first line
+    start_line = 0
+
+    # Auto-scroll only while Ronnor is speaking and caption is long
+    if (
+        shared_state.get("caption_speaker") == "RONNOR"
+        and total_lines > visible_lines
+        and shared_state.get("caption_duration", 0) > 0
+    ):
+        elapsed = time.time() - shared_state.get("caption_start_time", 0)
+        duration = shared_state.get("caption_duration", 1)
+
+        progress = max(0.0, min(elapsed / duration, 1.0))
+
+        max_start_line = total_lines - visible_lines
+        start_line = int(progress * max_start_line)
+
+    # Draw only the visible lines
+    y = CAPTION_PADDING
+    for line in lines[start_line:start_line + visible_lines]:
+        text_surface = font.render(line, True, CAPTION_TEXT_COLOR)
+        caption_surface.blit(text_surface, (CAPTION_PADDING, y))
+        y += font.get_linesize() + 4
+
+    screen.blit(caption_surface, (0, screen_height - CAPTION_BOX_HEIGHT))
 
 def launch_GUI(shared_state):
     pygame.init()
@@ -108,20 +167,16 @@ def launch_GUI(shared_state):
             if event.type == pygame.QUIT:
                 running = False
                 shared_state["running"] = False
+
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                #lets the operator press space once and force the next interaction to be typed.
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        running = False
-                        shared_state["running"] = False
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                        running = False
-                        shared_state["running"] = False
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                        print("[INPUT] Space bar pressed -> switching to text input.")
-                        shared_state["interrupt_requested"] = True
-                        shared_state["force_text_input"] = True
-                        shared_state["expression"] = "listening"  
+                running = False
+                shared_state["running"] = False
+
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                print("[INPUT] Space bar pressed -> switching to text input.")
+                shared_state["interrupt_requested"] = True
+                shared_state["force_text_input"] = True
+                shared_state["expression"] = "listening"
                
         new_expression = shared_state["expression"]
 
@@ -145,6 +200,8 @@ def launch_GUI(shared_state):
             last_frame_change = now
 
         draw_centered(screen, current_image, BACKGROUND_COLOR)
+        draw_caption(screen, shared_state)
+        pygame.display.flip()
         clock.tick(30)
 
     pygame.quit()
@@ -158,6 +215,10 @@ def main():
         "chat_active": False,
         "force_text_input": False,
         "interrupt_requested": False,
+        "caption_text": "",
+        "caption_start_time": 0.0,
+        "caption_duration": 0.0,
+        "caption_speaker": "",
     }
 
     # -----------------------------------------------------------
