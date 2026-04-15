@@ -1,5 +1,6 @@
 # CALL OLLAMA + PIPER TTS + WHISPER STT
 
+import ronnor_inventory
 import requests
 import subprocess
 import time
@@ -168,9 +169,42 @@ def chat_with_ollama(shared_state):
             shared_state["running"] = False
             break
 
+        # -------------------------------------------------------
+        # INVENTORY TOOL ROUTING
+        # -------------------------------------------------------
+        inventory_reply = None
+        try:
+            inventory_reply = ronnor_inventory.handle_inventory_query(user_text)
+        except Exception as e:
+            print(f"[INVENTORY] Inventory lookup failed: {e}")
+
+        if inventory_reply:
+            try:
+                print(f"Ronnor: {inventory_reply}")
+            except UnicodeEncodeError:
+                fallback_text = inventory_reply.encode("ascii", errors="replace").decode("ascii")
+                print(f"Ronnor: {fallback_text}")
+
+            messages.append({"role": "assistant", "content": inventory_reply})
+
+            if shared_state.get("interrupt_requested", False):
+                print("[CHAT] TTS skipped due to text-input interrupt.")
+                shared_state["interrupt_requested"] = False
+                shared_state["expression"] = "listening"
+                continue
+
+            set_expression(shared_state, "speaking")
+            try:
+                piper_tts.speak_text(inventory_reply)
+            finally:
+                if shared_state["running"]:
+                    shared_state["expression"] = "listening"
+
+            continue
+
         # Save user's message into conversation memory
         messages.append({"role": "user", "content": user_text})
-
+        
         try:
             # -------------------------------------------------------
             # CHECK INTERRUPT BEFORE SENDING TO OLLAMA
