@@ -27,12 +27,19 @@ from state_utils import set_expression, print_state_summary
 import time
 import textwrap
 
+#file paths and constants
+from pathlib import Path
+import subprocess
+
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 480
 FRAME_DELAY_MS = 700
 BACKGROUND_COLOR = (0, 0, 0)
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+
+WAKE_GREETING_PATH = Path("/home/pi/Ronnor/RONNOR/phrases/HiI'mRonyourshoestoreassistant.wav")
+WAKE_GREETING_CAPTION = "Hi, I am Ron, your shoe store assistant. How can I help you today?"
 
 #captions
 CAPTION_FONT_SIZE = 28
@@ -136,6 +143,27 @@ def draw_caption(screen, shared_state):
         y += font.get_linesize() + 4
 
     screen.blit(caption_surface, (0, screen_height - CAPTION_BOX_HEIGHT))
+
+def play_wake_greeting(shared_state):
+    """
+    Play a greeting audio right after wake word detection.
+    The robot will only start listening after the audio finishes.
+    """
+    if not WAKE_GREETING_PATH.is_file():
+        print(f"[AUDIO] Wake greeting not found: {WAKE_GREETING_PATH}")
+        return
+
+    try:
+        chatbot.set_caption(shared_state, "RONNOR", WAKE_GREETING_CAPTION, duration=3.0)
+        set_expression(shared_state, "speaking")
+        subprocess.run(["aplay", str(WAKE_GREETING_PATH)], check=True)
+
+    except subprocess.CalledProcessError as e:
+        print(f"[AUDIO] Failed to play wake greeting: {e}")
+
+    finally:
+        if shared_state["running"]:
+            set_expression(shared_state, "listening")
 
 def launch_GUI(shared_state):
     pygame.init()
@@ -249,7 +277,13 @@ def main():
 
             if result == "WAKE" and shared_state["running"]:
                 shared_state["chat_active"] = True
-                chatbot.chat_with_ollama(shared_state)
+
+                # Play greeting first, then start chat
+                play_wake_greeting(shared_state)
+
+                if shared_state["running"]:
+                    chatbot.chat_with_ollama(shared_state)
+
                 shared_state["chat_active"] = False
                 shared_state["expression"] = "idle"
 
