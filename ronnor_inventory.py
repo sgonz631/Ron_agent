@@ -233,13 +233,11 @@ def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
     if not rows:
         return (
             f"User request: {user_text}\n"
-            f"Parsed filters: {filters}\n"
             "Inventory results: none\n"
         )
 
     lines = [
         f"User request: {user_text}",
-        f"Parsed filters: {filters}",
         f"Inventory result count: {len(rows)}",
         "Inventory results:"
     ]
