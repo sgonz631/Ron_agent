@@ -180,31 +180,39 @@ def format_inventory_response(rows: list, filters: dict) -> str:
     if not rows:
         return "I could not find any matching shoes in inventory."
 
+    count = len(rows)
+
+    # ---------------------------------------------------
+    # SHORT + NATURAL RESPONSE
+    # ---------------------------------------------------
+    if count == 1:
+        brand, model, size, color, cost, qty, location, tags, promotion = rows[0]
+        return (
+            f"I found one option: {brand} {model}, size {size}, {color}, "
+            f"priced at {cost:.0f} dollars. Want more details?"
+        )
+
+    # ---------------------------------------------------
+    # MULTIPLE RESULTS → summarize instead of dump
+    # ---------------------------------------------------
+    models = list({f"{r[0]} {r[1]}" for r in rows})
+
+    # pick top 2–3 examples
+    examples = models[:3]
+
+    response = f"I found {count} options. "
+
+    response += "Some popular ones are: "
+    response += ", ".join(examples) + "."
+
+    # Add context if relevant
     if filters.get("wants_promotions"):
-        intro = "Here are the shoes I found with promotions:"
-    else:
-        intro = f"I found {len(rows)} matching shoe"
-        intro += "s:" if len(rows) != 1 else ":"
+        response += " Some of these are currently on promotion."
 
-    lines = [intro]
+    # Add follow-up guidance
+    response += " Want me to narrow it down by size, price, or style?"
 
-    for row in rows[:5]:
-        brand, model, size, color, cost, qty, location, tags, promotion = row
-
-        line = f"{brand} {model}, size {size}, {color}, {qty} in stock"
-        if location:
-            line += f", located at {location}"
-        line += f", priced at {cost:.0f} dollars"
-
-        if promotion:
-            line += f", promotion: {promotion}"
-
-        lines.append(line + ".")
-
-    if len(rows) > 5:
-        lines.append(f"There are also {len(rows) - 5} more matching options.")
-
-    return " ".join(lines)
+    return response
 
 
 def handle_inventory_query(user_text: str) -> str | None:
