@@ -266,6 +266,8 @@ def chat_with_ollama(shared_state):
                     merged_filters
                 )
 
+                best_pick = merged_rows[0] if merged_rows else None
+
                 merged_context = ronnor_inventory.build_inventory_context(
                     user_text,
                     merged_filters,
@@ -287,6 +289,15 @@ def chat_with_ollama(shared_state):
             try:
                 set_expression(shared_state, "thinking")
 
+                if best_pick:
+                    best_pick_text = (
+                        f"\n\nBest pick: {best_pick[0]} {best_pick[1]}, "
+                        f"size {best_pick[2]}, color {best_pick[3]}, "
+                        f"price ${best_pick[4]:.0f}, qty {best_pick[5]}"
+                    )
+                else:
+                    best_pick_text = ""
+
                 inventory_prompt_messages = [
                     {
                         "role": "system",
@@ -303,7 +314,7 @@ def chat_with_ollama(shared_state):
                     },
                     {
                         "role": "user",
-                        "content": inventory_data["context"]
+                        "content": inventory_data["context"] + best_pick_text
                     }
                 ]
 
@@ -335,7 +346,11 @@ def chat_with_ollama(shared_state):
                         + ", ".join(names)
                         + "."
                     )
-            set_caption(shared_state, "RONNOR",inventory_reply,piper_tts.estimate_speech_duration(inventory_reply))
+            set_caption(
+                shared_state,
+                "RONNOR",
+                inventory_reply,piper_tts.estimate_speech_duration(inventory_reply)
+            )
 
             try:
                 #set_caption(shared_state, "RONNOR",inventory_reply,piper_tts.estimate_speech_duration(inventory_reply))
