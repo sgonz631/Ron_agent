@@ -25,7 +25,7 @@ from state_utils import set_expression, print_state_summary
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
-OLLAMA_MODEL = "gemma3:1b"
+OLLAMA_MODEL = "ronnor:latest"
 
 THINKING_AUDIO_DIR = Path("/home/pi/Ronnor/RONNOR/phrases/thinking")
 
@@ -69,8 +69,6 @@ def is_end_chat_phrase(text: str) -> bool:
     end_phrases = [
         "bye",
         "bye bye",
-        "thank you",
-        "thank you ron",
         "thatll be all",
         "that will be all",
     ]
@@ -254,13 +252,8 @@ def chat_with_ollama(shared_state):
         {
             "role": "system",
             "content": (
-                "You are Ronnor, a concise and helpful voice assistant running on a Raspberry Pi. "
-                "Be conversational and friendly, but not overly chatty."
-                "Keep responses brief and clear unless the user asks for more detail. "
-                "Do not include stage directions, sound effects, or parenthetical cues. "
-                "If you are given inventory facts, use only those facts. "
-                "Do not invent products, sizes, prices, availability, or promotions. "
-                "Recommend the best match first when appropriate."
+                "Stay concise. Do not include stage directions, sound effects, or parentheses. "
+                "If factual inventory data is provided later, use only those facts."
             )
         }
     ]
@@ -395,14 +388,10 @@ def chat_with_ollama(shared_state):
                     {
                         "role": "system",
                         "content": (
-                            "You are Ronnor, a warm and helpful in-store shoe assistant. "
-                            "Use only the inventory facts provided. "
-                            "Speak naturally like a real store associate helping a customer in person. "
-                            "Start with the best match, but do not sound robotic or list-only. "
-                            "Keep responses brief, around 1 to 2 sentences. "
-                            "You may add a short helpful remark or follow-up question. "
-                            "Do not invent products, sizes, prices, availability, or promotions. "
-                            "Do not include stage directions or sound effects."
+                                "Use only the inventory facts provided. "
+                                "Do not invent products, sizes, prices, availability, or promotions. "
+                                "Start with the best match. "
+                                "Keep the answer brief, around 1 to 2 sentences."
                         )
                     },
                     {
@@ -619,7 +608,8 @@ def start_ollama():
 def ensure_model():
     """
     Checks whether the selected Ollama model is installed.
-    If not, pulls it automatically.
+    Pulls only registry models like gemma3:1b.
+    Local custom models like 'ronnor' must already exist.
     """
     print(f"[OLLAMA] Checking model: {OLLAMA_MODEL}")
 
@@ -634,6 +624,13 @@ def ensure_model():
 
     except Exception as e:
         print(f"[OLLAMA] Could not verify installed models: {e}")
+
+    # Heuristic: models without ":" are likely local custom models
+    if ":" not in OLLAMA_MODEL:
+        raise RuntimeError(
+            f"Local custom model '{OLLAMA_MODEL}' was not found. "
+            f"Create it first with: ollama create {OLLAMA_MODEL} -f Modelfile"
+        )
 
     print(f"[OLLAMA] Pulling model {OLLAMA_MODEL}...")
     subprocess.run(["ollama", "pull", OLLAMA_MODEL], check=True)
