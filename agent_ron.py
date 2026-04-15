@@ -10,7 +10,8 @@ os.environ.pop("LC_ALL", None)
 import sys
 import pygame
 import threading #one thread for Ollama and another for the images
- 
+import textwrap
+
 # Wake word model
 from testwakeword import WakeWordDetector
 
@@ -23,13 +24,21 @@ import chatbot
 #Time Helpers
 from state_utils import set_expression, print_state_summary
 
-
+#GUI Constants
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 480
 FRAME_DELAY_MS = 700
 BACKGROUND_COLOR = (0, 0, 0)
 SUPPORTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+
+#Caption Constants
+CAPTION_FONT_SIZE = 28
+CAPTION_BOX_HEIGHT = 110
+CAPTION_PADDING = 16
+CAPTION_TEXT_COLOR = (255, 255, 255)
+CAPTION_BOX_COLOR = (0, 0, 0)
+CAPTION_BOX_ALPHA = 180
 
 
 def load_face_folders(root_folder):
@@ -75,7 +84,37 @@ def draw_centered(screen, image, bg_color):
     screen.fill(bg_color)
     rect = image.get_rect(center=screen.get_rect().center)
     screen.blit(image, rect)
-    pygame.display.flip()
+
+def draw_caption(screen, caption_text):
+    """
+    Draw a single caption box at the bottom of the screen.
+    Only one caption is shown at a time.
+    """
+    if not caption_text:
+        return
+
+    screen_width, screen_height = screen.get_size()
+
+    # Create font
+    font = pygame.font.SysFont(None, CAPTION_FONT_SIZE)
+
+    # Wrap text so it fits inside the box
+    max_chars_per_line = 45
+    lines = textwrap.wrap(caption_text, width=max_chars_per_line)
+
+    # Create semi-transparent caption background
+    caption_surface = pygame.Surface((screen_width, CAPTION_BOX_HEIGHT), pygame.SRCALPHA)
+    caption_surface.fill((*CAPTION_BOX_COLOR, CAPTION_BOX_ALPHA))
+
+    # Draw text lines
+    y = CAPTION_PADDING
+    for line in lines[:3]:  # limit number of lines
+        text_surface = font.render(line, True, CAPTION_TEXT_COLOR)
+        caption_surface.blit(text_surface, (CAPTION_PADDING, y))
+        y += font.get_linesize() + 4
+
+    # Blit caption box at bottom
+    screen.blit(caption_surface, (0, screen_height - CAPTION_BOX_HEIGHT))
 
 
 def launch_GUI(shared_state):
@@ -108,20 +147,16 @@ def launch_GUI(shared_state):
             if event.type == pygame.QUIT:
                 running = False
                 shared_state["running"] = False
+
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                #lets the operator press space once and force the next interaction to be typed.
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        running = False
-                        shared_state["running"] = False
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                        running = False
-                        shared_state["running"] = False
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                        print("[INPUT] Space bar pressed -> switching to text input.")
-                        shared_state["interrupt_requested"] = True
-                        shared_state["force_text_input"] = True
-                        shared_state["expression"] = "listening"  
+                running = False
+                shared_state["running"] = False
+
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                print("[INPUT] Space bar pressed -> switching to text input.")
+                shared_state["interrupt_requested"] = True
+                shared_state["force_text_input"] = True
+                shared_state["expression"] = "listening" 
                
         new_expression = shared_state["expression"]
 
@@ -145,6 +180,8 @@ def launch_GUI(shared_state):
             last_frame_change = now
 
         draw_centered(screen, current_image, BACKGROUND_COLOR)
+        draw_caption(screen, shared_state.get("caption_text", ""))
+        pygame.display.flip()
         clock.tick(30)
 
     pygame.quit()
@@ -158,6 +195,7 @@ def main():
         "chat_active": False,
         "force_text_input": False,
         "interrupt_requested": False,
+        "caption_text": "",
     }
 
     # -----------------------------------------------------------

@@ -5,12 +5,16 @@ import subprocess
 import time
 import re
 import unicodedata
+import json
 
 # Text-to-speech helper
 import piper_tts
 
 # Speech-to-text helper
 import whisper_stt
+
+# Inventory management helper
+import inventory_terminal as inventory
 
 #time helpers for state tracking
 from state_utils import set_expression, print_state_summary
@@ -57,14 +61,165 @@ def is_end_chat_phrase(text: str) -> bool:
     end_phrases = [
         "bye",
         "bye bye",
-        "thank you",
-        "thank you ron",
         "thatll be all",
         "that will be all",
     ]
 
     return any(phrase in normalized for phrase in end_phrases)
 
+# -------------------------------------------------------------------
+# SAFE PRINT
+# -------------------------------------------------------------------
+def safe_print(text: str) -> None:
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        fallback = text.encode("ascii", errors="replace").decode("ascii")
+        print(fallback)
+
+#caption shortening helper
+def shorten_caption(text: str, max_len: int = 120) -> str:
+    """
+    Shortens long captions so they fit on screen better.
+    """
+    text = text.strip()
+    return text if len(text) <= max_len else text[:max_len - 3] + "..."
+
+# -------------------------------------------------------------------
+# INVENTORY INTENT DETECTION
+# -------------------------------------------------------------------
+def is_inventory_request(text: str) -> bool:
+    normalized = normalize_user_text(text)
+
+    keywords = [
+        "shoe", "shoes", "sneaker", "sneakers", "running shoes",
+        "nike", "adidas", "puma", "reebok", "asics",
+        "new balance", "converse", "vans", "under armour",
+        "size", "budget", "price", "color", "black", "white", "red", "blue"
+    ]
+
+    return any(word in normalized for word in keywords)
+
+
+# -------------------------------------------------------------------
+# INVENTORY SESSION HANDLER
+# -------------------------------------------------------------------
+def handle_inventory_turn(user_text: str, shared_state) -> bool:
+    """
+    Returns True if the turn was handled by inventory mode.
+    Returns False if normal Ollama chat should handle it.
+    """
+    inventory_mode = shared_state.get("inventory_mode", False)
+
+    if not inventory_mode and not is_inventory_request(user_text):
+        return False
+
+    shared_state["inventory_mode"] = True
+
+    # Initialize inventory state if missing
+    if "inventory_filters" not in shared_state:
+        shared_state["inventory_filters"] = inventory.empty_filters()
+
+    if "inventory_history" not in shared_state:
+        shared_state["inventory_history"] = []
+
+    if "inventory_pending_field" not in shared_state:
+        shared_state["inventory_pending_field"] = None
+
+    filters = shared_state["inventory_filters"]
+    history = shared_state["inventory_history"]
+    pending_field = shared_state["inventory_pending_field"]
+
+    history.append({"role": "user", "content": user_text})
+
+    # If Ron asked a specific follow-up, parse directly
+    if pending_field:
+        extracted = inventory.extract_for_expected_field(user_text, pending_field)
+        pending_field = None
+
+        if not extracted:
+            extracted = inventory.parse_with_ollama(user_text)
+    else:
+        extracted = inventory.parse_with_ollama(user_text)
+
+    filters = inventory.merge_filters(filters, extracted)
+
+    print("\n[DEBUG] Inventory filters:")
+    print(json.dumps(filters, indent=2))
+
+    missing = inventory.next_missing_field(filters)
+
+    if missing:
+        pending_field = missing
+        reply = inventory.question_for_field(missing)
+
+        shared_state["caption_text"] = f"RONNOR: {shorten_caption(reply)}"
+        safe_print(f"Ronnor: {reply}")
+        set_expression(shared_state, "speaking")
+
+        try:
+            piper_tts.speak_text(reply)
+        finally:
+            if shared_state["running"]:
+                set_expression(shared_state, "listening")
+
+        history.append({"role": "assistant", "content": reply})
+
+        shared_state["inventory_filters"] = filters
+        shared_state["inventory_history"] = history
+        shared_state["inventory_pending_field"] = pending_field
+        return True
+
+    rows, match_type = inventory.search_inventory_relaxed(filters)
+
+    reply = inventory.generate_natural_response(
+        user_request=" ".join(msg["content"] for msg in history if msg["role"] == "user"),
+        filters=filters,
+        rows=rows,
+        match_type=match_type,
+    )
+
+    safe_print(f"Ronnor: {reply}")
+    set_expression(shared_state, "speaking")
+    try:
+        piper_tts.speak_text(reply)
+    finally:
+        if shared_state["running"]:
+            set_expression(shared_state, "listening")
+
+    if rows:
+        followup = "Want to search for another pair?"
+        
+        shared_state["caption_text"] = f"RONNOR: {shorten_caption(followup)}" #caption
+        safe_print(f"Ronnor: {followup}")
+        set_expression(shared_state, "speaking")
+        
+        try:
+            piper_tts.speak_text(followup)
+        finally:
+            if shared_state["running"]:
+                set_expression(shared_state, "listening")
+
+        shared_state["inventory_mode"] = False
+        shared_state["inventory_filters"] = inventory.empty_filters()
+        shared_state["inventory_history"] = []
+        shared_state["inventory_pending_field"] = None
+    else:
+        followup = "I can check similar options if you want, maybe another color, brand, or budget."
+        shared_state["caption_text"] = f"RONNOR: {shorten_caption(followup)}"
+        safe_print(f"Ronnor: {followup}")
+        set_expression(shared_state, "speaking")
+        try:
+            piper_tts.speak_text(followup)
+        finally:
+            if shared_state["running"]:
+                set_expression(shared_state, "listening")
+
+        shared_state["inventory_filters"] = filters
+        shared_state["inventory_history"] = history
+        shared_state["inventory_pending_field"] = None
+
+    return True
 
 # -------------------------------------------------------------------
 # CHAT LOOP
@@ -92,6 +247,10 @@ def chat_with_ollama(shared_state):
         }
     ]
 
+    shared_state.setdefault("inventory_mode", False)
+    shared_state.setdefault("inventory_filters", inventory.empty_filters())
+    shared_state.setdefault("inventory_history", [])
+    shared_state.setdefault("inventory_pending_field", None)
     # Start in listening state
     shared_state["expression"] = "listening"
 
@@ -129,7 +288,9 @@ def chat_with_ollama(shared_state):
         if not user_text:
             shared_state["expression"] = "listening"
             continue
-
+        # Show user caption and keep it until Ronnor replies
+        shared_state["caption_text"] = f"USER: {shorten_caption(user_text)}"
+       
         # -----------------------------------------------------------
         # END CHAT ONLY
         # This now works for typed commands and voice phrases
@@ -146,6 +307,7 @@ def chat_with_ollama(shared_state):
             finally:
                 set_expression(shared_state, "idle")
 
+            shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
             break
 
@@ -164,9 +326,26 @@ def chat_with_ollama(shared_state):
             finally:
                 set_expression(shared_state, "idle")
 
+            shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
             shared_state["running"] = False
             break
+
+        # -----------------------------------------------------------
+        # INVENTORY MODE
+        # If the user is shopping for shoes, route to inventory logic
+        # -----------------------------------------------------------
+        try:
+            if handle_inventory_turn(user_text, shared_state):
+                continue
+        except Exception as e:
+            print(f"[INVENTORY] Error: {e}")
+            shared_state["inventory_mode"] = False
+            shared_state["inventory_filters"] = inventory.empty_filters()
+            shared_state["inventory_history"] = []
+            shared_state["inventory_pending_field"] = None
+            shared_state["expression"] = "listening"
+            continue
 
         # Save user's message into conversation memory
         messages.append({"role": "user", "content": user_text})
@@ -197,6 +376,7 @@ def chat_with_ollama(shared_state):
 
             data = response.json()
             assistant_text = data["message"]["content"].strip()
+            shared_state["caption_text"] = f"RONNOR: {shorten_caption(assistant_text)}"
 
             # Print response safely
             try:
@@ -236,18 +416,21 @@ def chat_with_ollama(shared_state):
         except requests.RequestException as e:
             print(f"[CHAT] Ollama request failed: {e}")
             set_expression(shared_state, "idle")
+            shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
             break
 
         except KeyError:
             print("[CHAT] Unexpected Ollama response format.")
             set_expression(shared_state, "idle")
+            shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
             break
 
         except KeyboardInterrupt:
             print("\n[CHAT] Interrupted by user.")
             set_expression(shared_state, "idle")
+            shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
             shared_state["running"] = False
             break
@@ -255,6 +438,7 @@ def chat_with_ollama(shared_state):
         except Exception as e:
             print(f"[CHAT] Unexpected error: {e}")
             set_expression(shared_state, "idle")
+            shared_state["caption_text"] = ""
             shared_state["chat_active"] = False
             break
 
