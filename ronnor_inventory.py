@@ -194,12 +194,10 @@ def search_inventory(filters: dict) -> list:
 
 
 def rank_inventory_rows(rows: list, filters: dict) -> list:
-    """
-    Rank rows so the best matches appear first.
-    More matching tags, requested promotions, and higher stock score better.
-    """
     desired_tags = set(filters.get("tags", []))
     wants_promotions = filters.get("wants_promotions", False)
+    requested_brand = filters.get("brand", "")
+    requested_size = filters.get("size", None)
 
     def score(row):
         brand, model, size, color, cost, qty, location, tags, promotion = row
@@ -209,12 +207,20 @@ def rank_inventory_rows(rows: list, filters: dict) -> list:
             tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
 
         score_value = 0
+
+        if requested_brand and brand.lower() == requested_brand:
+            score_value += 25
+
+        if requested_size is not None and size == requested_size:
+            score_value += 20
+
         score_value += len(desired_tags.intersection(tag_set)) * 10
 
         if wants_promotions and promotion and promotion.strip():
             score_value += 8
 
         score_value += min(qty, 10)
+
         return score_value
 
     return sorted(rows, key=score, reverse=True)
