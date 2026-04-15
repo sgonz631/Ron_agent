@@ -93,55 +93,78 @@ def update_session_preferences(session_preferences: dict, filters: dict) -> None
             if tag not in session_preferences["tags"]:
                 session_preferences["tags"].append(tag)
 
-def start_random_thinking_audio(shared_state):
+import threading
+
+import threading
+
+def play_one_random_thinking_audio(shared_state):
     """
-    Start one random thinking audio file in the background.
-    Also sets a random thinking caption.
-    Returns the subprocess handle, or None if nothing could be played.
+    Play one random thinking audio phrase immediately.
+    Blocking call used by the background worker.
     """
     if not THINKING_AUDIO_DIR.exists():
-        return None
+        return
 
     audio_files = sorted(
-        [p for p in THINKING_AUDIO_DIR.iterdir() if p.suffix.lower() == ".wav"]
+        [p for p in THINKING_AUDIO_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".wav"]
     )
 
     if not audio_files:
-        return None
+        return
 
     selected_audio = random.choice(audio_files)
     selected_caption = random.choice(THINKING_CAPTIONS)
 
-    set_caption(shared_state, "RONNOR", selected_caption, duration=9999.0)
+    set_caption(shared_state, "RONNOR", selected_caption, duration=15.0)
 
     try:
-        proc = subprocess.Popen(
+        subprocess.run(
             ["aplay", str(selected_audio)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            check=False,
         )
-        return proc
     except Exception as e:
-        print(f"[AUDIO] Failed to start thinking audio: {e}")
-        return None
+        print(f"[AUDIO] Failed to play thinking audio: {e}")
 
 
-def stop_thinking_audio(proc):
+def thinking_audio_worker(shared_state, stop_event):
     """
-    Stop the background thinking audio if it is still running.
+    While the bot is thinking, play a random phrase every 15 seconds.
     """
-    if proc is None:
+    # Play one phrase right away
+    if not stop_event.is_set():
+        play_one_random_thinking_audio(shared_state)
+
+    # Then keep repeating every 15 seconds
+    while not stop_event.wait(15):
+        if stop_event.is_set():
+            break
+        play_one_random_thinking_audio(shared_state)
+
+
+def start_thinking_audio_loop(shared_state):
+    """
+    Start a background thread that plays a random phrase every 15 seconds.
+    Returns (thread, stop_event).
+    """
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=thinking_audio_worker,
+        args=(shared_state, stop_event),
+        daemon=True,
+    )
+    thread.start()
+    return thread, stop_event
+
+
+def stop_thinking_audio_loop(stop_event):
+    """
+    Stop the repeating thinking-audio worker.
+    """
+    if stop_event is None:
         return
-
-    try:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-    except Exception as e:
-        print(f"[AUDIO] Failed to stop thinking audio: {e}")
+    stop_event.set()
 
 def merge_with_session_preferences(filters: dict, session_preferences: dict) -> dict:
     merged = {
@@ -233,7 +256,7 @@ def chat_with_ollama(shared_state):
         else:
             print("[VOICE] Speak now...")
             shared_state["expression"] = "listening"
-            user_text = whisper_stt.listen_and_transcribe(duration=5).strip()
+            user_text = whisper_stt.listen_and_transcribe(duration=12).strip()
             if user_text:
                 print(f"You (voice): {user_text}")
 
@@ -310,11 +333,12 @@ def chat_with_ollama(shared_state):
             print(f"[INVENTORY] Inventory lookup failed: {e}")
 
         if inventory_data:
-            thinking_audio_proc = None
-
+            thinking_audio_thread = None
+            thinking_audio_stop = None
+            
             try:
                 set_expression(shared_state, "thinking")
-                thinking_audio_proc = start_random_thinking_audio(shared_state)
+                thinking_audio_thread, thinking_audio_stop = start_thinking_audio_loop(shared_state)
 
                 inventory_prompt_messages = [
                     {
@@ -351,11 +375,13 @@ def chat_with_ollama(shared_state):
 
                 data = response.json()
                 # Stop thinking audio as soon as Ollama finishes
-                stop_thinking_audio(thinking_audio_proc)
+                stop_thinking_audio_loop(thinking_audio_stop)
 
                 inventory_reply = data["message"]["content"].strip()
 
+            #inventory except Exception as e
             except Exception as e:
+                stop_thinking_audio_loop(thinking_audio_stop)
                 print(f"[INVENTORY] Natural phrasing failed, using fallback: {e}")
 
                 rows = inventory_data["rows"]
@@ -398,6 +424,7 @@ def chat_with_ollama(shared_state):
         # Normal Ollama chat path
         messages.append({"role": "user", "content": user_text})
         thinking_audio_proc = None
+        thinking_audio_stop = None
 
         try:
             if shared_state.get("interrupt_requested", False):
@@ -407,7 +434,7 @@ def chat_with_ollama(shared_state):
                 continue
 
             set_expression(shared_state, "thinking")
-            thinking_audio_proc = start_random_thinking_audio(shared_state)
+            thinking_audio_thread, thinking_audio_stop = start_thinking_audio_loop(shared_state)
 
             response = requests.post(
                 OLLAMA_CHAT_URL,
@@ -421,8 +448,9 @@ def chat_with_ollama(shared_state):
             response.raise_for_status()
 
             data = response.json()
+
             # Stop thinking audio as soon as Ollama finishes
-            stop_thinking_audio(thinking_audio_proc)
+            stop_thinking_audio_loop(thinking_audio_stop)
             assistant_text = data["message"]["content"].strip()
 
             set_caption(
@@ -435,6 +463,7 @@ def chat_with_ollama(shared_state):
             try:
                 print(f"Ronnor: {assistant_text}")
             except UnicodeEncodeError:
+                stop_thinking_audio_loop(thinking_audio_stop)
                 fallback_text = assistant_text.encode("ascii", errors="replace").decode("ascii")
                 print(f"Ronnor: {fallback_text}")
 
@@ -454,14 +483,14 @@ def chat_with_ollama(shared_state):
                     shared_state["expression"] = "listening"
 
         except requests.Timeout:
-            stop_thinking_audio(thinking_audio_proc)
+            stop_thinking_audio_loop(thinking_audio_stop)
             print("[CHAT] Ollama took too long to respond. Please try again.")
             if shared_state["running"]:
                 shared_state["expression"] = "listening"
             continue
 
         except requests.RequestException as e:
-            stop_thinking_audio(thinking_audio_proc)
+            stop_thinking_audio_loop(thinking_audio_stop)
             print(f"[CHAT] Ollama request failed: {e}")
             set_expression(shared_state, "idle")
             clear_caption(shared_state)
@@ -469,7 +498,7 @@ def chat_with_ollama(shared_state):
             break
 
         except KeyError:
-            stop_thinking_audio(thinking_audio_proc)
+            stop_thinking_audio_loop(thinking_audio_stop)
             print("[CHAT] Unexpected Ollama response format.")
             set_expression(shared_state, "idle")
             clear_caption(shared_state)
@@ -477,7 +506,7 @@ def chat_with_ollama(shared_state):
             break
 
         except KeyboardInterrupt:
-            stop_thinking_audio(thinking_audio_proc)
+            stop_thinking_audio_loop(thinking_audio_stop)
             print("\n[CHAT] Interrupted by user.")
             set_expression(shared_state, "idle")
             clear_caption(shared_state)
@@ -486,7 +515,7 @@ def chat_with_ollama(shared_state):
             break
 
         except Exception as e:
-            stop_thinking_audio(thinking_audio_proc)
+            stop_thinking_audio_loop(thinking_audio_stop)
             print(f"[CHAT] Unexpected error: {e}")
             clear_caption(shared_state)
             set_expression(shared_state, "idle")
