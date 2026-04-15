@@ -90,6 +90,9 @@ def chat_with_ollama(shared_state):
         {
             "role": "system",
             "content": "You are Ronnor, a concise helpful voice assistant running on a Raspberry Pi."
+            "Respond naturally for spoken conversation. "
+            "Do not include stage directions, sound effects, or parenthetical cues like "
+            "'(brief pause)', '(static)', or '(whirring sound)'."
         }
     ]
 
