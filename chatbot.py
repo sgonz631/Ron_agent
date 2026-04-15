@@ -25,7 +25,7 @@ from state_utils import set_expression, print_state_summary
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE_URL}/api/chat"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
-OLLAMA_MODEL = "gemma3:4b-q4_K_M"
+OLLAMA_MODEL = "gemma3:1b"
 
 THINKING_AUDIO_DIR = Path("/home/pi/Ronnor/RONNOR/phrases/thinking")
 
