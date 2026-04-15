@@ -98,6 +98,7 @@ def extract_tags(user_text: str) -> list[str]:
     for tag in found:
         if tag not in deduped:
             deduped.append(tag)
+
     return deduped
 
 
@@ -132,6 +133,17 @@ def parse_inventory_request(user_text: str) -> dict:
             word in text for word in ["promotion", "promotions", "deal", "deals", "discount"]
         ),
     }
+
+
+def get_inventory_filters(user_text: str):
+    """
+    Parse inventory-like user text into filters only.
+    Returns None if this does not look like an inventory request.
+    """
+    if not seems_inventory_request(user_text):
+        return None
+
+    return parse_inventory_request(user_text)
 
 
 def search_inventory(filters: dict) -> list:
@@ -190,14 +202,12 @@ def rank_inventory_rows(rows: list, filters: dict) -> list:
             tag_set = {t.strip().lower() for t in tags.split(",") if t.strip()}
 
         score_value = 0
-
         score_value += len(desired_tags.intersection(tag_set)) * 10
 
         if wants_promotions and promotion and promotion.strip():
             score_value += 8
 
         score_value += min(qty, 10)
-
         return score_value
 
     return sorted(rows, key=score, reverse=True)
@@ -243,14 +253,14 @@ def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
 
 def get_inventory_context(user_text: str):
     """
-    Main entry point for chatbot.py.
-    Returns None if this doesn't look like an inventory request.
-    Otherwise returns a dict with filters, rows, and a compact context string.
+    Full helper: parse, search, rank, and build context.
+    Kept for compatibility, but chatbot.py can use get_inventory_filters()
+    to avoid duplicate searches after merging session preferences.
     """
-    if not seems_inventory_request(user_text):
+    filters = get_inventory_filters(user_text)
+    if not filters:
         return None
 
-    filters = parse_inventory_request(user_text)
     rows = rank_inventory_rows(search_inventory(filters), filters)
     context = build_inventory_context(user_text, filters, rows)
 
