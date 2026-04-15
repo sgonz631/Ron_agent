@@ -13,9 +13,8 @@ import piper_tts
 # Speech-to-text helper
 import whisper_stt
 
-#time helpers for state tracking
+# time helpers for state tracking
 from state_utils import set_expression, print_state_summary
-
 
 
 # -------------------------------------------------------------------
@@ -50,8 +49,6 @@ def is_end_chat_phrase(text: str) -> bool:
     """
     Returns True if the user said a phrase that should end the chat
     and return Ronnor to wake-word mode.
-
-    Uses partial matching so it also works if Whisper adds extra words.
     """
     normalized = normalize_user_text(text)
 
@@ -68,24 +65,64 @@ def is_end_chat_phrase(text: str) -> bool:
 
 
 # -------------------------------------------------------------------
+# HELPERS
+# -------------------------------------------------------------------
+def update_session_preferences(session_preferences: dict, filters: dict) -> None:
+    if filters.get("brand"):
+        session_preferences["brand"] = filters["brand"]
+
+    if filters.get("size") is not None:
+        session_preferences["size"] = filters["size"]
+
+    if filters.get("color"):
+        session_preferences["color"] = filters["color"]
+
+    if filters.get("tags"):
+        for tag in filters["tags"]:
+            if tag not in session_preferences["tags"]:
+                session_preferences["tags"].append(tag)
+
+
+def merge_with_session_preferences(filters: dict, session_preferences: dict) -> dict:
+    merged = {
+        "brand": filters.get("brand") or session_preferences.get("brand"),
+        "size": filters.get("size") if filters.get("size") is not None else session_preferences.get("size"),
+        "color": filters.get("color") or session_preferences.get("color"),
+        "tags": list(filters.get("tags", [])),
+        "wants_promotions": filters.get("wants_promotions", False),
+    }
+
+    for tag in session_preferences.get("tags", []):
+        if tag not in merged["tags"]:
+            merged["tags"].append(tag)
+
+    return merged
+
+
+def clean_text_for_tts(text: str) -> str:
+    """
+    Remove stage directions and awkward pause markers before TTS.
+    """
+    if not text:
+        return ""
+
+    text = re.sub(r"\((?:[^)]*)\)", " ", text)
+    text = re.sub(r"\s*\.\.\.\s*", ". ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+# -------------------------------------------------------------------
 # CHAT LOOP
 # -------------------------------------------------------------------
 def chat_with_ollama(shared_state):
     """
     Starts a chat session with Ollama.
-
-    Behavior:
-    - voice is the default input mode
-    - space bar in agent_ron.py can force text input for the next turn
-    - interrupt_requested lets text input take priority
-    - 'bye' ends only the current chat session
-    - 'exit' closes the whole app
-    - every Ollama response is spoken through Piper
     """
     print("[CHAT] Wake word detected. Starting terminal chat.")
     print("[CHAT] Type 'bye' to end chat, 'exit' to close Ronnor.\n")
 
-    # Conversation history for Ollama
+    # Conversation history for normal chat with Ollama
     messages = [
         {
             "role": "system",
@@ -98,27 +135,23 @@ def chat_with_ollama(shared_state):
         }
     ]
 
-    # Start in listening state
+    # Session memory for inventory follow-ups
+    session_preferences = {
+        "brand": None,
+        "size": None,
+        "color": None,
+        "tags": []
+    }
+
     shared_state["expression"] = "listening"
 
-    # Main chat loop
     while shared_state["running"]:
 
-        # -----------------------------------------------------------
-        # GLOBAL INTERRUPT HANDLER
-        # If space was pressed in the GUI, this flag is raised.
-        # We clear it here and force the next input to be text.
-        # -----------------------------------------------------------
         if shared_state.get("interrupt_requested", False):
             print("[CHAT] Interrupt detected.")
             shared_state["interrupt_requested"] = False
             shared_state["expression"] = "listening"
 
-        # -----------------------------------------------------------
-        # INPUT SELECTION
-        # Default = voice
-        # If space bar was pressed in agent_ron GUI, use text once
-        # -----------------------------------------------------------
         if shared_state.get("force_text_input", False):
             shared_state["force_text_input"] = False
             user_text = input("You (text): ").strip()
@@ -131,19 +164,12 @@ def chat_with_ollama(shared_state):
 
         command = user_text.lower()
 
-        # Ignore empty input
         if not user_text:
             shared_state["expression"] = "listening"
             continue
 
-        # -----------------------------------------------------------
-        # END CHAT ONLY
-        # This now works for typed commands and voice phrases
-        # -----------------------------------------------------------
         if command in {"bye", "stop", "quit"} or is_end_chat_phrase(user_text):
             print("[CHAT] Ending chat mode.")
-
-            # Optional spoken goodbye
             try:
                 set_expression(shared_state, "speaking")
                 piper_tts.speak_text("Goodbye! See you soon!")
@@ -155,13 +181,8 @@ def chat_with_ollama(shared_state):
             shared_state["chat_active"] = False
             break
 
-        # -----------------------------------------------------------
-        # CLOSE ENTIRE APP
-        # -----------------------------------------------------------
         if command == "exit":
             print("[SYSTEM] Shutting down Ronnor.")
-
-            # Optional spoken shutdown message
             try:
                 shared_state["expression"] = "speaking"
                 piper_tts.speak_text("Shutting down.")
@@ -174,12 +195,36 @@ def chat_with_ollama(shared_state):
             shared_state["running"] = False
             break
 
-                # -------------------------------------------------------
+        # -------------------------------------------------------
         # INVENTORY TOOL ROUTING
         # -------------------------------------------------------
         inventory_data = None
         try:
-            inventory_data = ronnor_inventory.get_inventory_context(user_text)
+            raw_inventory_data = ronnor_inventory.get_inventory_context(user_text)
+
+            if raw_inventory_data:
+                merged_filters = merge_with_session_preferences(
+                    raw_inventory_data["filters"],
+                    session_preferences
+                )
+
+                merged_rows = ronnor_inventory.search_inventory(merged_filters)
+                merged_rows = ronnor_inventory.rank_inventory_rows(merged_rows, merged_filters)
+
+                merged_context = ronnor_inventory.build_inventory_context(
+                    user_text,
+                    merged_filters,
+                    merged_rows
+                )
+
+                inventory_data = {
+                    "filters": merged_filters,
+                    "rows": merged_rows,
+                    "context": merged_context,
+                }
+
+                update_session_preferences(session_preferences, raw_inventory_data["filters"])
+
         except Exception as e:
             print(f"[INVENTORY] Inventory lookup failed: {e}")
 
@@ -192,12 +237,14 @@ def chat_with_ollama(shared_state):
                         "role": "system",
                         "content": (
                             "You are Ronnor, a helpful in-store shoe assistant. "
-                            "Reply naturally and briefly, like a real store associate speaking out loud. "
-                            "Use ONLY the inventory facts provided. "
-                            "Do not invent products, sizes, prices, colors, promotions, or stock. "
-                            "If there are matches, summarize the best options in 1 to 3 short sentences. "
-                            "Do not list every item unless the user explicitly asks for all of them. "
-                            "If there are no matches, say that clearly and offer a helpful next step. "
+                            "Speak naturally and briefly, like a real store associate. "
+                            "Use only the inventory facts provided. "
+                            "Do not invent products, sizes, prices, availability, or promotions. "
+                            "Recommend the best matches first instead of listing everything. "
+                            "Keep responses to 1 to 3 short sentences. "
+                            "If the request is broad, suggest one helpful way to narrow it down, such as size, style, or brand. "
+                            "If the user already gave a preference like size or brand, respect it. "
+                            "Avoid repeating the full user request. "
                             "Do not include stage directions, sound effects, or parenthetical cues."
                         )
                     },
@@ -252,27 +299,23 @@ def chat_with_ollama(shared_state):
 
             set_expression(shared_state, "speaking")
             try:
-                piper_tts.speak_text(inventory_reply)
+                piper_tts.speak_text(clean_text_for_tts(inventory_reply))
             finally:
                 if shared_state["running"]:
                     shared_state["expression"] = "listening"
 
             continue
 
-        # Save user's message into conversation memory
+        # Normal Ollama chat path
         messages.append({"role": "user", "content": user_text})
-        
+
         try:
-            # -------------------------------------------------------
-            # CHECK INTERRUPT BEFORE SENDING TO OLLAMA
-            # -------------------------------------------------------
             if shared_state.get("interrupt_requested", False):
                 print("[CHAT] Request interrupted before sending to Ollama.")
                 shared_state["interrupt_requested"] = False
                 shared_state["expression"] = "listening"
                 continue
 
-            # Show thinking face while Ollama is generating
             set_expression(shared_state, "thinking")
 
             response = requests.post(
@@ -289,31 +332,23 @@ def chat_with_ollama(shared_state):
             data = response.json()
             assistant_text = data["message"]["content"].strip()
 
-            # Print response safely
             try:
                 print(f"Ronnor: {assistant_text}")
             except UnicodeEncodeError:
                 fallback_text = assistant_text.encode("ascii", errors="replace").decode("ascii")
                 print(f"Ronnor: {fallback_text}")
 
-            # Save assistant message to memory
             messages.append({"role": "assistant", "content": assistant_text})
 
-            # -------------------------------------------------------
-            # CHECK INTERRUPT BEFORE TTS
-            # -------------------------------------------------------
             if shared_state.get("interrupt_requested", False):
                 print("[CHAT] TTS skipped due to text-input interrupt.")
                 shared_state["interrupt_requested"] = False
                 shared_state["expression"] = "listening"
                 continue
 
-            # -------------------------------------------------------
-            # SPEAK WITH PIPER
-            # -------------------------------------------------------
             set_expression(shared_state, "speaking")
             try:
-                piper_tts.speak_text(assistant_text)
+                piper_tts.speak_text(clean_text_for_tts(assistant_text))
             finally:
                 if shared_state["running"]:
                     shared_state["expression"] = "listening"
@@ -372,10 +407,8 @@ def start_ollama():
     Starts Ollama server if it is not already running.
     """
     print("[OLLAMA] Starting Ollama server...")
-
     subprocess.Popen(["ollama", "serve"])
 
-    # Wait up to ~20 seconds for the server to become available
     for _ in range(20):
         if is_ollama_running():
             print("[OLLAMA] Server is running.")
@@ -464,7 +497,6 @@ def setup_ollama():
 # STANDALONE TEST MODE
 # -------------------------------------------------------------------
 if __name__ == "__main__":
-    # Shared state for standalone testing without agent_ron.py
     test_state = {
         "expression": "idle",
         "running": True,
