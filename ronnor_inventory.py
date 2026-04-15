@@ -53,14 +53,19 @@ def extract_size(user_text: str):
     if match:
         return float(match.group(1))
 
-    match = re.search(r"\b(\d+(?:\.\d+)?)\b", text)
-    if match:
+    matches = re.findall(r"\b(\d+(?:\.\d+)?)\b", text)
+    candidates = []
+
+    for m in matches:
         try:
-            value = float(match.group(1))
+            value = float(m)
             if 4 <= value <= 18:
-                return value
+                candidates.append(value)
         except ValueError:
             pass
+
+    if len(candidates) == 1:
+        return candidates[0]
 
     return None
 
@@ -233,7 +238,7 @@ def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
         "Inventory results:"
     ]
 
-    for row in rows[:8]:
+    for row in rows[:3]:
         brand, model, size, color, cost, qty, location, tags, promotion = row
         line = (
             f"- {brand} {model} | size {size} | color {color} | "
