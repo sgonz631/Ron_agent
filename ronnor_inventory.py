@@ -43,9 +43,7 @@ TAG_SYNONYMS = {
 
 
 def normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    return text.lower().strip()
+    return text.lower().strip() if text else ""
 
 
 def extract_size(user_text: str):
@@ -91,7 +89,6 @@ def extract_tags(user_text: str) -> list[str]:
         if canonical in text:
             found.append(canonical)
             continue
-
         for word in words:
             if word in text:
                 found.append(canonical)
@@ -101,7 +98,6 @@ def extract_tags(user_text: str) -> list[str]:
     for tag in found:
         if tag not in deduped:
             deduped.append(tag)
-
     return deduped
 
 
@@ -111,15 +107,14 @@ def seems_inventory_request(user_text: str) -> bool:
     inventory_words = [
         "shoe", "shoes", "sneaker", "sneakers",
         "inventory", "stock", "have", "carry", "available",
-        "size", "brand", "model", "color", "promotion", "promotions"
+        "size", "brand", "model", "color", "promotion", "promotions",
+        "deal", "deals"
     ]
 
     if any(word in text for word in inventory_words):
         return True
-
     if extract_brand(text):
         return True
-
     if extract_tags(text):
         return True
 
@@ -127,12 +122,13 @@ def seems_inventory_request(user_text: str) -> bool:
 
 
 def parse_inventory_request(user_text: str) -> dict:
+    text = normalize_text(user_text)
     return {
-        "brand": extract_brand(user_text),
-        "size": extract_size(user_text),
-        "color": extract_color(user_text),
-        "tags": extract_tags(user_text),
-        "wants_promotions": "promotion" in user_text.lower() or "promotions" in user_text.lower() or "deal" in user_text.lower(),
+        "brand": extract_brand(text),
+        "size": extract_size(text),
+        "color": extract_color(text),
+        "tags": extract_tags(text),
+        "wants_promotions": any(word in text for word in ["promotion", "promotions", "deal", "deals", "discount"]),
     }
 
 
@@ -176,49 +172,59 @@ def search_inventory(filters: dict) -> list:
     return rows
 
 
-def format_inventory_response(rows: list, filters: dict) -> str:
+def build_inventory_context(user_text: str, filters: dict, rows: list) -> str:
+    """
+    Build a compact, factual context block for Ollama.
+    """
     if not rows:
-        return "I could not find any matching shoes in inventory."
-
-    count = len(rows)
-
-    # ---------------------------------------------------
-    # SHORT + NATURAL RESPONSE
-    # ---------------------------------------------------
-    if count == 1:
-        brand, model, size, color, cost, qty, location, tags, promotion = rows[0]
         return (
-            f"I found one option: {brand} {model}, size {size}, {color}, "
-            f"priced at {cost:.0f} dollars. Want more details?"
+            f"User request: {user_text}\n"
+            f"Parsed filters: {filters}\n"
+            "Inventory results: none\n"
         )
 
-    # ---------------------------------------------------
-    # MULTIPLE RESULTS → summarize instead of dump
-    # ---------------------------------------------------
-    models = list({f"{r[0]} {r[1]}" for r in rows})
+    lines = [
+        f"User request: {user_text}",
+        f"Parsed filters: {filters}",
+        f"Inventory result count: {len(rows)}",
+        "Inventory results:"
+    ]
 
-    # pick top 2–3 examples
-    examples = models[:3]
+    for row in rows[:8]:
+        brand, model, size, color, cost, qty, location, tags, promotion = row
+        line = (
+            f"- {brand} {model} | size {size} | color {color} | "
+            f"price ${cost:.0f} | qty {qty}"
+        )
+        if location:
+            line += f" | location {location}"
+        if tags:
+            line += f" | tags {tags}"
+        if promotion:
+            line += f" | promotion {promotion}"
+        lines.append(line)
 
-    response = f"I found {count} options. "
+    if len(rows) > 8:
+        lines.append(f"- plus {len(rows) - 8} more matching result(s)")
 
-    response += "Some popular ones are: "
-    response += ", ".join(examples) + "."
-
-    # Add context if relevant
-    if filters.get("wants_promotions"):
-        response += " Some of these are currently on promotion."
-
-    # Add follow-up guidance
-    response += " Want me to narrow it down by size, price, or style?"
-
-    return response
+    return "\n".join(lines)
 
 
-def handle_inventory_query(user_text: str) -> str | None:
+def get_inventory_context(user_text: str):
+    """
+    Main entry point for chatbot.py.
+    Returns None if this doesn't look like an inventory request.
+    Otherwise returns a dict with filters, rows, and a compact context string.
+    """
     if not seems_inventory_request(user_text):
         return None
 
     filters = parse_inventory_request(user_text)
     rows = search_inventory(filters)
-    return format_inventory_response(rows, filters)
+    context = build_inventory_context(user_text, filters, rows)
+
+    return {
+        "filters": filters,
+        "rows": rows,
+        "context": context,
+    }
