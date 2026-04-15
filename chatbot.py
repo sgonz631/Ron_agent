@@ -200,16 +200,18 @@ def chat_with_ollama(shared_state):
         # -------------------------------------------------------
         inventory_data = None
         try:
-            raw_inventory_data = ronnor_inventory.get_inventory_context(user_text)
+            raw_filters = ronnor_inventory.get_inventory_filters(user_text)
 
-            if raw_inventory_data:
+            if raw_filters:
                 merged_filters = merge_with_session_preferences(
-                    raw_inventory_data["filters"],
+                    raw_filters,
                     session_preferences
                 )
 
-                merged_rows = ronnor_inventory.search_inventory(merged_filters)
-                merged_rows = ronnor_inventory.rank_inventory_rows(merged_rows, merged_filters)
+                merged_rows = ronnor_inventory.rank_inventory_rows(
+                    ronnor_inventory.search_inventory(merged_filters),
+                    merged_filters
+                )
 
                 merged_context = ronnor_inventory.build_inventory_context(
                     user_text,
@@ -223,7 +225,7 @@ def chat_with_ollama(shared_state):
                     "context": merged_context,
                 }
 
-                update_session_preferences(session_preferences, raw_inventory_data["filters"])
+                update_session_preferences(session_preferences, raw_filters)
 
         except Exception as e:
             print(f"[INVENTORY] Inventory lookup failed: {e}")
