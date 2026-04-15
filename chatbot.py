@@ -84,6 +84,15 @@ def update_session_preferences(session_preferences: dict, filters: dict) -> None
 
 
 def merge_with_session_preferences(filters: dict, session_preferences: dict) -> dict:
+    if filters.get("wants_promotions"):
+        return {
+            "brand": filters.get("brand", ""),
+            "size": filters.get("size"),
+            "color": filters.get("color", ""),
+            "tags": list(filters.get("tags", [])),
+            "wants_promotions": True,
+        }
+
     merged = {
         "brand": filters.get("brand") or session_preferences.get("brand"),
         "size": filters.get("size") if filters.get("size") is not None else session_preferences.get("size"),
@@ -127,6 +136,23 @@ def clear_caption(shared_state):
     shared_state["caption_speaker"] = ""
     shared_state["caption_start_time"] = 0.0
     shared_state["caption_duration"] = 0.0
+
+def should_reset_inventory_preferences(user_text: str) -> bool:
+    text = normalize_user_text(user_text)
+
+    reset_phrases = [
+        "what shoes are on promotion",
+        "what other shoes do you have",
+        "now im interested in",
+        "any size or style",
+        "show me all",
+        "start over",
+        "something else",
+        "other shoes",
+    ]
+
+    return any(phrase in text for phrase in reset_phrases)
+
 # -------------------------------------------------------------------
 # CHAT LOOP
 # -------------------------------------------------------------------
@@ -222,6 +248,14 @@ def chat_with_ollama(shared_state):
             raw_filters = ronnor_inventory.get_inventory_filters(user_text)
 
             if raw_filters:
+                if should_reset_inventory_preferences(user_text):
+                    session_preferences = {
+                        "brand": None,
+                        "size": None,
+                        "color": None,
+                        "tags": []
+                    }
+                    
                 merged_filters = merge_with_session_preferences(
                     raw_filters,
                     session_preferences
