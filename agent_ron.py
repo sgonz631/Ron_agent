@@ -2,6 +2,10 @@ import os
 import sys
 import signal
 
+#for path management
+import subprocess
+from pathlib import Path
+
 os.environ["LANG"] = "en_US.UTF-8"
 os.environ["LANGUAGE"] = "en_US.UTF-8"
 os.environ["LC_CTYPE"] = "en_US.UTF-8"
@@ -24,6 +28,8 @@ import chatbot
 
 #Time Helpers
 from state_utils import set_expression, print_state_summary
+
+WAKE_GREETING_PATH = Path("/home/pi/Ronnor/RONNOR/phrases/HiI'mRonyourshoestoreassistant.wav")
 
 #GUI Constants
 FACES_ROOT = "/home/pi/Ronnor/RONNOR/faces/faces - Copy"  
@@ -86,6 +92,29 @@ def draw_centered(screen, image, bg_color):
     screen.fill(bg_color)
     rect = image.get_rect(center=screen.get_rect().center)
     screen.blit(image, rect)
+
+def play_wake_greeting(shared_state):
+    """
+    Play the wake greeting audio before the robot starts listening.
+    This blocks until playback finishes.
+    """
+    if not WAKE_GREETING_PATH.is_file():
+        print(f"[AUDIO] Wake greeting not found: {WAKE_GREETING_PATH}")
+        return
+
+    try:#add captions for the wake greeting
+        shared_state["caption_text"] = "RONNOR: Hi! I'm Ron, your shoe store assistant. How can I help you today?"
+        shared_state["caption_speaker"] = "RONNOR"
+        shared_state["caption_start_time"] = time.time()
+        shared_state["caption_duration"] = 2.5
+
+        set_expression(shared_state, "speaking")
+        subprocess.run(["aplay", str(WAKE_GREETING_PATH)], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"[AUDIO] Failed to play wake greeting: {e}")
+    finally:
+        if shared_state["running"]:
+            set_expression(shared_state, "listening")
 
 def draw_caption(screen, shared_state):
     """
@@ -249,7 +278,13 @@ def main():
 
             if result == "WAKE" and shared_state["running"]:
                 shared_state["chat_active"] = True
-                chatbot.chat_with_ollama(shared_state)
+
+                # Play greeting first, then start listening
+                play_wake_greeting(shared_state)
+
+                if shared_state["running"]:
+                    chatbot.chat_with_ollama(shared_state)
+
                 shared_state["chat_active"] = False
                 shared_state["expression"] = "idle"
 
