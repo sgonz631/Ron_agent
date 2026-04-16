@@ -447,8 +447,8 @@ def chat_with_ollama(shared_state):
                         "content": (
                                 "Use only the inventory facts provided. "
                                 "Do not invent products, sizes, prices, availability, or promotions. "
-                                "Start with the best match. "
                                 "Keep the answer brief, around 1 to 2 sentences."
+                                "Offer the best pick first, then mention if there are more options. "
                         )
                     },
                     {
