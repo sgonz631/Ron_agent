@@ -114,9 +114,9 @@ def play_one_random_thinking_audio(shared_state):
         return
 
     selected_audio = random.choice(audio_files)
-    selected_caption = random.choice(THINKING_CAPTIONS)
+    #selected_caption = random.choice(THINKING_CAPTIONS)
 
-    set_caption(shared_state, "RONNOR", selected_caption, duration=15.0)
+    #set_caption(shared_state, "RONNOR", selected_caption, duration=15.0)
 
     try:
         subprocess.run(
