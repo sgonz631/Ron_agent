@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
+import audioop
 
 
 # -------------------------------------------------------------------
@@ -59,31 +60,120 @@ def _clean_transcript(text: str) -> str:
 # AUDIO RECORDING
 # -------------------------------------------------------------------
 def record_audio_to_wav(
-    duration: int = 5,
+    max_record_seconds: int = 12,
     sample_rate: int = 16000,
-    device: Optional[str] = None,
+    silence_threshold: int = 700,
+    silence_seconds_to_stop: float = 1.2,
+    speech_start_timeout: float = 6.0,
+    device: str | None = None,
 ) -> str:
     """
-    Records mono microphone audio to a temporary WAV file using arecord.
+    Record from microphone until the user stops speaking.
+
+    Behavior:
+    - waits for speech to begin
+    - once speech begins, keeps recording
+    - stops after sustained silence
+    - also stops at max_record_seconds as a safety cap
+
     Returns the WAV path.
     """
+    import os
+    import wave
+    import tempfile
+    import subprocess
+    import time
+
+    chunk_seconds = 0.25
+    chunk_frames = int(sample_rate * chunk_seconds)
+    bytes_per_sample = 2  # S16_LE mono
+    chunk_bytes = chunk_frames * bytes_per_sample
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
         wav_path = tmp.name
 
     cmd = [
         "arecord",
+        "-q",
         "-f", "S16_LE",
         "-r", str(sample_rate),
         "-c", "1",
-        "-d", str(duration),
-        wav_path,
+        "-t", "raw",
     ]
 
-    # Optional ALSA device override
     if device:
         cmd = ["arecord", "-D", device] + cmd[1:]
 
-    subprocess.run(cmd, check=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+
+    frames = []
+    speech_started = False
+    silence_chunks_needed = max(1, int(silence_seconds_to_stop / chunk_seconds))
+    silence_chunk_count = 0
+
+    start_time = time.time()
+    speech_wait_start = time.time()
+
+    try:
+        while True:
+            if proc.stdout is None:
+                break
+
+            chunk = proc.stdout.read(chunk_bytes)
+            if not chunk:
+                break
+
+            rms = audioop.rms(chunk, 2)
+
+            # Wait for speech to begin
+            if not speech_started:
+                if rms >= silence_threshold:
+                    speech_started = True
+                    frames.append(chunk)
+                    silence_chunk_count = 0
+                else:
+                    # No speech yet: stop waiting after timeout
+                    if time.time() - speech_wait_start > speech_start_timeout:
+                        break
+                    continue
+            else:
+                frames.append(chunk)
+
+                if rms < silence_threshold:
+                    silence_chunk_count += 1
+                else:
+                    silence_chunk_count = 0
+
+                # Stop once we detect sustained silence after speech
+                if silence_chunk_count >= silence_chunks_needed:
+                    break
+
+            # Safety cap
+            if time.time() - start_time >= max_record_seconds:
+                break
+
+    finally:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            pass
+
+    # Save recorded frames as WAV
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit audio
+        wf.setframerate(sample_rate)
+        wf.writeframes(b"".join(frames))
+
     return wav_path
 
 
@@ -117,16 +207,16 @@ def transcribe_file(wav_path: str, language: str = "en") -> str:
 
 
 def listen_and_transcribe(
-    duration: int = 5,
+    max_record_seconds: int = 10,
     sample_rate: int = 16000,
     language: str = "en",
-    device: Optional[str] = None,
+    device: str | None = None,
 ) -> str:
     """
-    Record from mic, transcribe, clean up temp file, return text.
+    Record until the user stops speaking, then transcribe.
     """
     wav_path = record_audio_to_wav(
-        duration=duration,
+        max_record_seconds=max_record_seconds,
         sample_rate=sample_rate,
         device=device,
     )

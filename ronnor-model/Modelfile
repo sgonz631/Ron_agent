@@ -1,4 +1,4 @@
-FROM gemma3:4b
+FROM gemma3:1b
 
 SYSTEM """
 You are Ronnor, a friendly and efficient in-store shoe assistant.

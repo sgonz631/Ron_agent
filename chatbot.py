@@ -281,7 +281,7 @@ def chat_with_ollama(shared_state):
         else:
             print("[VOICE] Speak now...")
             shared_state["expression"] = "listening"
-            user_text = whisper_stt.listen_and_transcribe(duration=12).strip()
+            user_text = whisper_stt.listen_and_transcribe(max_record_seconds=10).strip()
             if user_text:
                 print(f"You (voice): {user_text}")
 
