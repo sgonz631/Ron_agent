@@ -8,6 +8,7 @@ import re
 import unicodedata
 import random
 from pathlib import Path
+from num2words import num2words
 
 # Text-to-speech helper
 import piper_tts
@@ -191,17 +192,73 @@ def merge_with_session_preferences(filters: dict, session_preferences: dict) -> 
 
     return merged
 
+def format_size_numbers_for_tts(text: str) -> str:
+    """
+    Convert shoe-size style decimals like 10.0 -> 10
+    but keep real decimals like 10.5 unchanged.
+    """
+    def repl(match):
+        number_str = match.group(1)
+        value = float(number_str)
+
+        if value.is_integer():
+            return str(int(value))
+        return number_str
+
+    return re.sub(r"\b(\d+\.\d+)\b", repl, text)
+
+
+def format_currency_for_tts(text: str) -> str:
+    """
+    Convert prices like $120 or $120.00 into spoken words.
+    Example:
+    $120 -> one hundred and twenty dollars
+    $89.50 -> eighty-nine dollars and fifty cents
+    """
+    def repl(match):
+        amount_str = match.group(1)
+        amount = float(amount_str)
+
+        dollars = int(amount)
+        cents = int(round((amount - dollars) * 100))
+
+        if cents == 0:
+            if dollars == 1:
+                return "one dollar"
+            return f"{num2words(dollars)} dollars"
+
+        dollar_part = "one dollar" if dollars == 1 else f"{num2words(dollars)} dollars"
+        cent_part = "one cent" if cents == 1 else f"{num2words(cents)} cents"
+        return f"{dollar_part} and {cent_part}"
+
+    return re.sub(r"\$(\d+(?:\.\d{1,2})?)", repl, text)
 
 def clean_text_for_tts(text: str) -> str:
     """
-    Remove stage directions and awkward pause markers before TTS.
+    Clean the response before TTS:
+    - remove stage directions
+    - smooth awkward pauses
+    - convert size values like 10.0 -> 10
+    - convert currency like $120 -> one hundred and twenty dollars
     """
     if not text:
         return ""
 
+    # Remove parentheses/stage directions
     text = re.sub(r"\((?:[^)]*)\)", " ", text)
+
+    # Smooth awkward pause markers
     text = re.sub(r"\s*\.\.\.\s*", ". ", text)
+
+    # Convert currency first
+    text = format_currency_for_tts(text)
+
+    # Then clean numeric sizes like 10.0 -> 10
+    text = format_size_numbers_for_tts(text)
+
+    # Collapse whitespace
     text = re.sub(r"\s+", " ", text).strip()
+
     return text
 
 def set_caption(shared_state, speaker: str, text: str, duration: float = 0.0):
